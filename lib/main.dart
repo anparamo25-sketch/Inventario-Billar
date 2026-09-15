@@ -109,7 +109,7 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 8),
         const Text('La bodega se controla por cajillas y unidades equivalentes.'),
         const SizedBox(height: 12),
-        ...products.map((p) => Card(child: ListTile(title: Text(p.name), subtitle: Text('${p.warehouseUnits ~/ p.packSize} cajillas + ${p.warehouseUnits % p.packSize} unidades | ${p.warehouseUnits} unidades'), trailing: IconButton(icon: const Icon(Icons.edit), onPressed: () => editWarehouse(p))))
+        ...products.map((p) => Card(child: ListTile(title: Text(p.name), subtitle: Text('${p.warehouseUnits ~/ p.packSize} cajillas + ${p.warehouseUnits % p.packSize} unidades | ${p.warehouseUnits} unidades'), trailing: IconButton(icon: const Icon(Icons.edit), onPressed: () => editWarehouse(p)))))
       ]);
 
   Widget freezer() => ListView(padding: const EdgeInsets.all(16), children: [
