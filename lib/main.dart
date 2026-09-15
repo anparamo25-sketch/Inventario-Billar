@@ -1,384 +1,93 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const InventarioApp());
 
 class Product {
-  final String name;
-  final int price;
-  final int packSize;
-  int warehouseUnits;
-  int freezerUnits;
-
-  Product({required this.name, required this.price, required this.packSize, this.warehouseUnits = 0, this.freezerUnits = 0});
+  final String name; final int price; final int packSize;
+  int warehouseUnits; int freezerUnits;
+  Product({required this.name, required this.price, required this.packSize, this.warehouseUnits=0, this.freezerUnits=0});
+  Map<String,dynamic> toJson()=>{'name':name,'warehouse':warehouseUnits,'freezer':freezerUnits};
+}
+class Loan {
+  final String person, reason; final int amount; final DateTime date;
+  Loan(this.person,this.amount,this.reason,this.date);
+  Map<String,dynamic> toJson()=>{'person':person,'amount':amount,'reason':reason,'date':date.toIso8601String()};
+  factory Loan.fromJson(Map<String,dynamic> j)=>Loan(j['person']??'',(j['amount']??0) as int,j['reason']??'',DateTime.tryParse(j['date']??'')??DateTime.now());
+}
+class Consumption {
+  final String person, product; final int quantity,value; final DateTime date;
+  Consumption(this.person,this.product,this.quantity,this.value,this.date);
+  Map<String,dynamic> toJson()=>{'person':person,'product':product,'quantity':quantity,'value':value,'date':date.toIso8601String()};
+  factory Consumption.fromJson(Map<String,dynamic> j)=>Consumption(j['person']??'',j['product']??'',(j['quantity']??0) as int,(j['value']??0) as int,DateTime.tryParse(j['date']??'')??DateTime.now());
+}
+class Movement {
+  final String product,type; final int units; final DateTime date;
+  Movement(this.product,this.units,this.date,{this.type='Bodega → Freezer'});
+  Map<String,dynamic> toJson()=>{'product':product,'units':units,'type':type,'date':date.toIso8601String()};
+  factory Movement.fromJson(Map<String,dynamic> j)=>Movement(j['product']??'',(j['units']??0) as int,DateTime.tryParse(j['date']??'')??DateTime.now(),type:j['type']??'Bodega → Freezer');
+}
+class DayRecord {
+  final DateTime date; final Map<String,int> opening, finalFreezer, sold, refill;
+  final List<Loan> loans; final List<Consumption> consumptions; final List<Movement> movements;
+  final int sales,expected,actual,difference;
+  DayRecord({required this.date,required this.opening,required this.finalFreezer,required this.sold,required this.refill,required this.loans,required this.consumptions,required this.movements,required this.sales,required this.expected,required this.actual,required this.difference});
+  Map<String,dynamic> toJson()=>{'date':date.toIso8601String(),'opening':opening,'final':finalFreezer,'sold':sold,'refill':refill,'loans':loans.map((x)=>x.toJson()).toList(),'consumptions':consumptions.map((x)=>x.toJson()).toList(),'movements':movements.map((x)=>x.toJson()).toList(),'sales':sales,'expected':expected,'actual':actual,'difference':difference};
+  static Map<String,int> map(dynamic v){final m=Map<String,dynamic>.from(v??{});return m.map((k,x)=>MapEntry(k,(x as num).toInt()));}
+  factory DayRecord.fromJson(Map<String,dynamic> j)=>DayRecord(date:DateTime.tryParse(j['date']??'')??DateTime.now(),opening:map(j['opening']),finalFreezer:map(j['final']),sold:map(j['sold']),refill:map(j['refill']),loans:(j['loans'] as List???[]).map((x)=>Loan.fromJson(Map<String,dynamic>.from(x))).toList(),consumptions:(j['consumptions'] as List???[]).map((x)=>Consumption.fromJson(Map<String,dynamic>.from(x))).toList(),movements:(j['movements'] as List???[]).map((x)=>Movement.fromJson(Map<String,dynamic>.from(x))).toList(),sales:(j['sales']??0) as int,expected:(j['expected']??0) as int,actual:(j['actual']??0) as int,difference:(j['difference']??0) as int);
 }
 
-final products = <Product>[
-  Product(name: 'Toña pequeña', price: 46, packSize: 24),
-  Product(name: 'Litro Toña', price: 95, packSize: 12),
-  Product(name: 'Frost litro', price: 80, packSize: 12),
-  Product(name: 'Frost pequeña', price: 40, packSize: 24),
-  Product(name: 'Gaseosa', price: 25, packSize: 24),
+final products=<Product>[
+ Product(name:'Toña pequeña',price:46,packSize:24),Product(name:'Litro Toña',price:95,packSize:12),Product(name:'Frost litro',price:80,packSize:12),Product(name:'Frost pequeña',price:40,packSize:24),Product(name:'Gaseosa',price:25,packSize:24),
 ];
 
-class Loan {
-  final String person;
-  final int amount;
-  final String reason;
-  final DateTime date;
-  Loan(this.person, this.amount, this.reason, this.date);
+class Store {
+ static Future<SharedPreferences> get p=>SharedPreferences.getInstance();
+ static Future<void> save(List<Product> ps,List<DayRecord> h,Map<String,int> opening,DateTime date)async{final x=await p;await x.setString('products',jsonEncode(ps.map((p)=>p.toJson()).toList()));await x.setString('history',jsonEncode(h.map((r)=>r.toJson()).toList()));await x.setString('opening',jsonEncode(opening));await x.setString('date',date.toIso8601String());}
+ static Future<Map<String,dynamic>> load()async{final x=await p;dynamic dec(String k,dynamic fallback){try{return jsonDecode(x.getString(k)??jsonEncode(fallback));}catch(_){return fallback;}}return {'products':dec('products',[]),'history':dec('history',[]),'opening':dec('opening',{}),'date':x.getString('date')};}
 }
 
-class Consumption {
-  final String person;
-  final String product;
-  final int quantity;
-  final int value;
-  final DateTime date;
-  Consumption(this.person, this.product, this.quantity, this.value, this.date);
+class InventarioApp extends StatelessWidget{const InventarioApp({super.key});@override Widget build(BuildContext c)=>MaterialApp(debugShowCheckedModeBanner:false,title:'Inventario Billar',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.indigo),home:const HomePage());}
+
+class HomePage extends StatefulWidget{const HomePage({super.key});@override State<HomePage> createState()=>_HomePageState();}
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver{
+ int tab=0; bool loading=true,dayClosed=false; DateTime jornada=DateTime.now(); Timer? timer;
+ final loans=<Loan>[];final consumptions=<Consumption>[];final movements=<Movement>[];final history=<DayRecord>[];final opening=<String,int>{};
+ int lastSales=0,lastExpected=0,lastActual=0,lastDifference=0;
+ bool sameDay(DateTime a,DateTime b)=>a.year==b.year&&a.month==b.month&&a.day==b.day;
+ @override void initState(){super.initState();WidgetsBinding.instance.addObserver(this);load();timer=Timer.periodic(const Duration(seconds:15),(_)=>save());}
+ Future<void> load()async{final d=await Store.load();final saved=d['products'] as List;for(final item in saved){final j=Map<String,dynamic>.from(item);for(final p in products){if(p.name==j['name']){p.warehouseUnits=(j['warehouse']??0) as int;p.freezerUnits=(j['freezer']??0) as int;}}}history.addAll((d['history'] as List).map((x)=>DayRecord.fromJson(Map<String,dynamic>.from(x))));opening.addAll(DayRecord.map(d['opening']));jornada=DateTime.tryParse(d['date']??'')??DateTime.now();if(opening.isEmpty){for(final p in products)opening[p.name]=p.freezerUnits;}if(history.isNotEmpty&&sameDay(history.last.date,jornada)){dayClosed=true;}if(!sameDay(jornada,DateTime.now())&&dayClosed){jornada=DateTime.now();opening..clear()..addEntries(products.map((p)=>MapEntry(p.name,p.freezerUnits)));dayClosed=false;loans.clear();consumptions.clear();movements.clear();}setState(()=>loading=false);}
+ Future<void> save()async{if(loading)return;await Store.save(products,history,opening,jornada);}
+ @override void didChangeAppLifecycleState(AppLifecycleState s){if(s==AppLifecycleState.inactive||s==AppLifecycleState.paused||s==AppLifecycleState.detached)save();}
+ @override void dispose(){timer?.cancel();WidgetsBinding.instance.removeObserver(this);save();super.dispose();}
+ Future<void> mutate(VoidCallback f)async{setState(f);await save();}
+ @override Widget build(BuildContext c){if(loading)return const Scaffold(body:Center(child:CircularProgressIndicator()));final pages=[home(),warehouse(),freezer(),HistoryPage(history:history)];return Scaffold(appBar:AppBar(title:const Text('Inventario Billar')),body:pages[tab],bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Inicio'),NavigationDestination(icon:Icon(Icons.inventory_2_outlined),label:'Bodega'),NavigationDestination(icon:Icon(Icons.ac_unit),label:'Freezer'),NavigationDestination(icon:Icon(Icons.history),label:'Historial')]),floatingActionButton:dayClosed?null:FloatingActionButton.extended(onPressed:closeDay,icon:const Icon(Icons.lock_clock),label:const Text('Cerrar jornada')));}
+ Widget home(){final b=products.fold(0,(s,p)=>s+p.warehouseUnits);final f=products.fold(0,(s,p)=>s+p.freezerUnits);return ListView(padding:const EdgeInsets.all(16),children:[Text('Resumen de hoy',style:Theme.of(context).textTheme.headlineSmall),Text(DateFormat('dd/MM/yyyy').format(jornada)),const SizedBox(height:16),Row(children:[Expanded(child:stat('Bodega','$b unidades',Icons.warehouse_outlined)),const SizedBox(width:12),Expanded(child:stat('Freezer','$f unidades',Icons.ac_unit))]),Card(child:ListTile(title:const Text('Ventas último cierre'),subtitle:Text('C\$${lastSales}'))),Card(child:ListTile(title:const Text('Efectivo esperado'),subtitle:Text('C\$${lastExpected}'))),FilledButton.icon(onPressed:dayClosed?null:addLoan,icon:const Icon(Icons.payments),label:const Text('Registrar préstamo / retiro')),OutlinedButton.icon(onPressed:dayClosed?null:addConsumption,icon:const Icon(Icons.restaurant),label:const Text('Registrar consumo del propietario')),const Card(child:ListTile(leading:Icon(Icons.save),title:Text('Autoguardado activo'),subtitle:Text('Se guarda automáticamente cada 15 segundos y al salir o enviar la app a segundo plano.'))),],);}
+ Widget stat(String a,String b,IconData i)=>Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(i),Text(a),Text(b,style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))])));
+ Widget warehouse()=>ListView(padding:const EdgeInsets.all(16),children:[const Text('Bodega',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...products.map((p)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(p.name,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text('${p.warehouseUnits~/p.packSize} cajillas + ${p.warehouseUnits%p.packSize} unidades • ${p.warehouseUnits} unidades'),Row(children:[Expanded(child:OutlinedButton(onPressed:()=>editWarehouse(p),child:const Text('Ajustar'))),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:dayClosed?null:()=>move(p),child:const Text('Pasar a freezer')))])]))))]);
+ Widget freezer()=>ListView(padding:const EdgeInsets.all(16),children:[const Text('Freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...products.map((p)=>Card(child:ListTile(title:Text(p.name),subtitle:Text('Actual: ${p.freezerUnits} • Esperado al abrir: ${opening[p.name]??0}'),trailing:Text('C\$${p.price}'))))]);
+ Future<void> editWarehouse(Product p)async{final c=TextEditingController(text:'${p.warehouseUnits}');final v=await showDialog<int>(context:context,builder:(_)=>AlertDialog(title:Text(p.name),content:TextField(controller:c,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades')),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,int.tryParse(c.text)??0),child:const Text('Guardar'))]));c.dispose();if(v!=null&&v>=0)await mutate(()=>p.warehouseUnits=v);}
+ Future<void> move(Product p)async{final c=TextEditingController();final v=await showDialog<int>(context:context,builder:(_)=>AlertDialog(title:Text('Pasar ${p.name} al freezer'),content:TextField(controller:c,keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Unidades',helperText:'Bodega: ${p.warehouseUnits}')),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,int.tryParse(c.text)??0),child:const Text('Trasladar'))]));c.dispose();if(v==null||v<=0)return;if(v>p.warehouseUnits){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('No hay suficientes unidades.')));return;}await mutate(()=>{p.warehouseUnits-=v,p.freezerUnits+=v,movements.add(Movement(p.name,v,DateTime.now()))});}
+ Future<void> addLoan()async{final a=TextEditingController(),m=TextEditingController(),r=TextEditingController();final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Préstamo / retiro'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:a,decoration:const InputDecoration(labelText:'Persona')),TextField(controller:m,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Monto C\$')),TextField(controller:r,decoration:const InputDecoration(labelText:'Motivo'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&(int.tryParse(m.text)??0)>0&&a.text.trim().isNotEmpty)await mutate(()=>loans.add(Loan(a.text.trim(),int.parse(m.text),r.text.trim(),DateTime.now())));a.dispose();m.dispose();r.dispose();}
+ Future<void> addConsumption()async{String? sel;final who=TextEditingController(),q=TextEditingController(text:'1');final ok=await showDialog<bool>(context:context,builder:(_)=>StatefulBuilder(builder:(c,setD)=>AlertDialog(title:const Text('Consumo del propietario'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:who,decoration:const InputDecoration(labelText:'Quién')),DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Producto'),items:products.map((p)=>DropdownMenuItem(value:p.name,child:Text(p.name))).toList(),onChanged:(v)=>setD(()=>sel=v)),TextField(controller:q,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Cantidad'))]),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Guardar'))])));if(ok==true&&sel!=null){final p=products.firstWhere((x)=>x.name==sel);final n=int.tryParse(q.text)??0;if(n>0&&n<=p.freezerUnits&&who.text.trim().isNotEmpty)await mutate(()=>{p.freezerUnits-=n,consumptions.add(Consumption(who.text.trim(),p.name,n,n*p.price,DateTime.now()))});else if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Datos o existencia inválidos.')));}who.dispose();q.dispose();}
+ Future<void> closeDay()async{final controllers={for(final p in products)p.name:TextEditingController(text:'${p.freezerUnits}')};final counts=await Navigator.push<Map<String,int>>(context,MaterialPageRoute(builder:(_)=>ClosingPage(products:products,controllers:controllers,opening:opening)));for(final c in controllers.values)c.dispose();if(counts==null)return;final sold=<String,int>{};int sales=0;for(final p in products){final n=counts[p.name]!;final s=p.freezerUnits-n;if(s<0)return;p.freezerUnits=n;if(s>0){sold[p.name]=s;sales+=s*p.price;}}final loan=loans.fold(0,(s,x)=>s+x.amount),cons=consumptions.fold(0,(s,x)=>s+x.value),expected=sales-loan-cons;final actual=await Navigator.push<int>(context,MaterialPageRoute(builder:(_)=>CashPage(sales:sales,loans:loan,cons:cons,expected:expected)));if(actual==null)return;final diff=actual-expected;await showDialog(context:context,barrierDismissible:false,builder:(_)=>AlertDialog(title:const Text('Arqueo final'),content:Text(diff==0?'Exacto: C\$0':diff<0?'Faltante: C\$${diff.abs()}':'Sobrante: C\$${diff.abs()}'),actions:[FilledButton(onPressed:()=>Navigator.pop(context),child:const Text('Continuar'))]));final refill=await Navigator.push<Map<String,int>>(context,MaterialPageRoute(builder:(_)=>RefillPage(products:products)));if(refill==null)return;final preRefill={for(final p in products)p.name:p.freezerUnits};await mutate((){for(final p in products){final n=refill[p.name]??0;p.warehouseUnits-=n;p.freezerUnits+=n;if(n>0)movements.add(Movement(p.name,n,DateTime.now(),type:'Bodega → Freezer (Relleno)'));}history.add(DayRecord(date:jornada,opening:Map.from(opening),finalFreezer:preRefill,sold:sold,refill:Map.from(refill),loans:List.from(loans),consumptions:List.from(consumptions),movements:List.from(movements),sales:sales,expected:expected,actual:actual,difference:diff);lastSales=sales;lastExpected=expected;lastActual=actual;lastDifference=diff;opening..clear()..addEntries(products.map((p)=>MapEntry(p.name,p.freezerUnits)));loans.clear();consumptions.clear();movements.clear();dayClosed=true;});if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Jornada cerrada y freezer preparado para mañana.')));}
 }
 
-class Movement {
-  final String product;
-  final int units;
-  final DateTime date;
-  Movement(this.product, this.units, this.date);
+class ClosingPage extends StatelessWidget{final List<Product> products;final Map<String,TextEditingController> controllers,opening;const ClosingPage({super.key,required this.products,required this.controllers,required this.opening});@override Widget build(BuildContext c)=>Scaffold(appBar:AppBar(title:const Text('Cierre de jornada')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Inventario final del freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),const Text('Cada producto aparece como tarjeta. Ingresa las unidades que quedan.'),...products.map((p)=>Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(p.name,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text('Esperado al abrir: ${opening[p.name]??0} • Disponible: ${p.freezerUnits}'),TextField(controller:controllers[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades que quedan')),const SizedBox(height:6),ValueListenableBuilder<TextEditingValue>(valueListenable:controllers[p.name]!,builder:(_,v,__){final n=int.tryParse(v.text)??0;final s=(p.freezerUnits-n).clamp(0,p.freezerUnits);return Text('Venta calculada: $s unidades • C\$${s*p.price}',style:const TextStyle(fontWeight:FontWeight.bold));})])))),FilledButton(onPressed:(){final r=<String,int>{};for(final p in products){final n=int.tryParse(controllers[p.name]!.text)??-1;if(n<0||n>p.freezerUnits)return;r[p.name]=n;}Navigator.pop(c,r);},child:const Text('Confirmar inventario y continuar al arqueo'))]));}
 }
+class CashPage extends StatefulWidget{final int sales,loans,cons,expected;const CashPage({super.key,required this.sales,required this.loans,required this.cons,required this.expected});@override State<CashPage> createState()=>_CashPageState();}
+class _CashPageState extends State<CashPage>{final c=TextEditingController();@override Widget build(BuildContext x){final a=int.tryParse(c.text);final d=a==null?null:a-widget.expected;return Scaffold(appBar:AppBar(title:const Text('Arqueo de caja')),body:ListView(padding:const EdgeInsets.all(20),children:[Text('Ventas: C\$${widget.sales}'),Text('Préstamos/retiros: - C\$${widget.loans}'),Text('Consumos: - C\$${widget.cons}'),Text('Efectivo esperado: C\$${widget.expected}',style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(height:16),TextField(controller:c,onChanged:(_)=>setState((){}),keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Efectivo contado',border:OutlineInputBorder())),if(d!=null)Padding(padding:const EdgeInsets.all(16),child:Text(d==0?'Exacto':d<0?'Faltante: C\$${d.abs()}':'Sobrante: C\$${d.abs()}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))),FilledButton(onPressed:a==null?null:()=>Navigator.pop(x,a),child:const Text('Confirmar arqueo'))]));}}
+class RefillPage extends StatelessWidget{final List<Product> products;const RefillPage({super.key,required this.products});@override Widget build(BuildContext c){final cs={for(final p in products)p.name:TextEditingController(text:'0')};return Scaffold(appBar:AppBar(title:const Text('Rellenar Freezer')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Esta es la última acción de la jornada.',style:TextStyle(fontSize:22,fontWeight:FontWeight.bold)),...products.map((p)=>Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(p.name,style:const TextStyle(fontWeight:FontWeight.bold)),Text('Bodega: ${p.warehouseUnits} • Freezer actual: ${p.freezerUnits}'),TextField(controller:cs[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades a sacar de bodega'))])))),FilledButton(onPressed:(){final r=<String,int>{};for(final p in products){final n=int.tryParse(cs[p.name]!.text)??0;if(n<0||n>p.warehouseUnits)return;r[p.name]=n;}Navigator.pop(c,r);},child:const Text('Confirmar y cerrar jornada'))]));}}
 
-class InventarioApp extends StatelessWidget {
-  const InventarioApp({super.key});
-  @override
-  Widget build(BuildContext context) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Inventario Billar',
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-        home: const HomePage(),
-      );
-}
+class HistoryPage extends StatefulWidget{final List<DayRecord> history;const HistoryPage({super.key,required this.history});@override State<HistoryPage> createState()=>_HistoryPageState();}
+class _HistoryPageState extends State<HistoryPage>{String? month;@override Widget build(BuildContext c){final sorted=[...widget.history]..sort((a,b)=>b.date.compareTo(a.date));final months=sorted.map((r)=>DateFormat('yyyy-MM').format(r.date)).toSet().toList();month??=(months.isEmpty?null:months.first);final rs=sorted.where((r)=>month==null||DateFormat('yyyy-MM').format(r.date)==month).toList();return ListView(padding:const EdgeInsets.all(16),children:[const Text('Historial por meses',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),if(months.isNotEmpty)DropdownButtonFormField<String>(value:month,items:months.map((m)=>DropdownMenuItem(value:m,child:Text(m))).toList(),onChanged:(v)=>setState(()=>month=v),decoration:const InputDecoration(labelText:'Mes')),if(rs.isNotEmpty)FilledButton.icon(onPressed:()=>PdfReport.generate(rs,month!),icon:const Icon(Icons.picture_as_pdf),label:const Text('Generar y guardar PDF del mes')),const SizedBox(height:10),...rs.map((r)=>Card(child:ExpansionTile(title:Text(DateFormat('dd/MM/yyyy').format(r.date)),subtitle:Text('Ventas C\$${r.sales} • ${r.difference==0?'Exacto':r.difference<0?'Faltante':'Sobrante'}'),children:[ListTile(title:const Text('Efectivo esperado'),trailing:Text('C\$${r.expected}')),ListTile(title:const Text('Efectivo contado'),trailing:Text('C\$${r.actual}')),ListTile(title:const Text('Diferencia'),trailing:Text('C\$${r.difference}')),ListTile(title:const Text('Préstamos'),trailing:Text('C\$${r.loans.fold(0,(s,x)=>s+x.amount)}')),ListTile(title:const Text('Consumos'),trailing:Text('C\$${r.consumptions.fold(0,(s,x)=>s+x.value)}')),ListTile(title:const Text('Unidades vendidas'),trailing:Text('${r.sold.values.fold(0,(a,b)=>a+b)}'))]))),if(rs.isEmpty)const Text('No hay jornadas cerradas en este mes.')]);}}
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
-  @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  int tab = 0;
-  final loans = <Loan>[];
-  final consumptions = <Consumption>[];
-  final movements = <Movement>[];
-  final saleUnits = <String, int>{};
-  bool dayClosed = false;
-  int lastSales = 0;
-  int lastExpectedCash = 0;
-  int lastActualCash = 0;
-  int lastDifference = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final pages = [dashboard(), warehouse(), freezer(), const HistoryPage()];
-    return Scaffold(
-      appBar: AppBar(title: const Text('Inventario Billar')),
-      body: pages[tab],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: tab,
-        onDestinationSelected: (i) => setState(() => tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Inicio'),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Bodega'),
-          NavigationDestination(icon: Icon(Icons.ac_unit), label: 'Freezer'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'Historial'),
-        ],
-      ),
-      floatingActionButton: dayClosed
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: closeDay,
-              icon: const Icon(Icons.lock_clock),
-              label: const Text('Cerrar jornada'),
-            ),
-    );
-  }
-
-  Widget dashboard() {
-    final warehouse = products.fold<int>(0, (s, p) => s + p.warehouseUnits);
-    final freezer = products.fold<int>(0, (s, p) => s + p.freezerUnits);
-    final expected = lastSales - loans.fold<int>(0, (s, l) => s + l.amount) - consumptions.fold<int>(0, (s, c) => s + c.value);
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('Resumen de hoy', style: Theme.of(context).textTheme.headlineSmall),
-      const SizedBox(height: 16),
-      Row(children: [
-        Expanded(child: statCard('Bodega', '$warehouse unidades', Icons.warehouse_outlined)),
-        const SizedBox(width: 12),
-        Expanded(child: statCard('Freezer', '$freezer unidades', Icons.ac_unit)),
-      ]),
-      const SizedBox(height: 12),
-      Card(child: ListTile(leading: const Icon(Icons.point_of_sale), title: const Text('Ventas de cierre'), subtitle: Text('C\$${NumberFormat('#,##0').format(lastSales)}'))),
-      Card(child: ListTile(leading: const Icon(Icons.account_balance_wallet_outlined), title: const Text('Efectivo esperado'), subtitle: Text('C\$${NumberFormat('#,##0').format(expected)}'))),
-      const SizedBox(height: 8),
-      FilledButton.icon(onPressed: dayClosed ? null : () => addLoan(), icon: const Icon(Icons.payments_outlined), label: const Text('Registrar préstamo / retiro')),
-      OutlinedButton.icon(onPressed: dayClosed ? null : () => addConsumption(), icon: const Icon(Icons.restaurant_outlined), label: const Text('Registrar consumo del propietario')),
-      const SizedBox(height: 8),
-      Card(child: ListTile(title: const Text('Movimientos bodega → freezer'), subtitle: Text('${movements.length} movimientos registrados'))),
-    ]);
-  }
-
-  Widget statCard(String title, String value, IconData icon) => Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon), const SizedBox(height: 8), Text(title), Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold))])));
-
-  Widget warehouse() => ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Bodega', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        const Text('Existencia interna por unidades. La pantalla muestra cajillas + unidades.'),
-        const SizedBox(height: 12),
-        ...products.map((p) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(p.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          Text('${p.warehouseUnits ~/ p.packSize} cajillas + ${p.warehouseUnits % p.packSize} unidades  •  ${p.warehouseUnits} unidades'),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: () => editWarehouse(p), icon: const Icon(Icons.edit), label: const Text('Ajustar'))),
-            const SizedBox(width: 8),
-            Expanded(child: FilledButton.icon(onPressed: dayClosed ? null : () => moveToFreezer(p), icon: const Icon(Icons.south), label: const Text('Pasar a freezer'))),
-          ]),
-        ]))))
-      ]);
-
-  Widget freezer() => ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Freezer', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        const Text('Las existencias se manejan en unidades. Las ventas y consumos descuentan unidades.'),
-        const SizedBox(height: 12),
-        ...products.map((p) => Card(child: ListTile(
-          leading: const Icon(Icons.ac_unit),
-          title: Text(p.name),
-          subtitle: Text('${p.freezerUnits} unidades disponibles'),
-          trailing: Text('C\$${p.price}'),
-        )))
-      ]);
-
-  Future<void> editWarehouse(Product p) async {
-    final c = TextEditingController(text: p.warehouseUnits.toString());
-    final value = await showDialog<int>(context: context, builder: (_) => AlertDialog(title: Text('Bodega: ${p.name}'), content: TextField(controller: c, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Unidades totales')), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, int.tryParse(c.text) ?? 0), child: const Text('Guardar'))]));
-    c.dispose();
-    if (value != null && value >= 0) setState(() => p.warehouseUnits = value);
-  }
-
-  Future<void> moveToFreezer(Product p) async {
-    final c = TextEditingController();
-    final units = await showDialog<int>(context: context, builder: (_) => AlertDialog(
-      title: Text('Pasar ${p.name} al freezer'),
-      content: TextField(controller: c, autofocus: true, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Unidades a trasladar', helperText: 'Disponible en bodega: ${p.warehouseUnits}')),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, int.tryParse(c.text) ?? 0), child: const Text('Trasladar'))],
-    ));
-    c.dispose();
-    if (units == null || units <= 0) return;
-    if (units > p.warehouseUnits) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay suficientes unidades en bodega.')));
-      return;
-    }
-    setState(() {
-      p.warehouseUnits -= units;
-      p.freezerUnits += units;
-      movements.add(Movement(p.name, units, DateTime.now()));
-    });
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$units unidades de ${p.name} pasaron al freezer.')));
-  }
-
-  Future<void> addLoan() async {
-    final person = TextEditingController();
-    final amount = TextEditingController();
-    final reason = TextEditingController();
-    final result = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Préstamo / retiro'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: person, decoration: const InputDecoration(labelText: 'Persona')),
-        TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Monto C$')),
-        TextField(controller: reason, decoration: const InputDecoration(labelText: 'Motivo / observación')),
-      ]),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar'))],
-    ));
-    if (result == true) {
-      final value = int.tryParse(amount.text) ?? 0;
-      if (person.text.trim().isNotEmpty && value > 0) setState(() => loans.add(Loan(person.text.trim(), value, reason.text.trim(), DateTime.now())));
-    }
-    person.dispose(); amount.dispose(); reason.dispose();
-  }
-
-  Future<void> addConsumption() async {
-    String? selected;
-    final person = TextEditingController();
-    final qty = TextEditingController(text: '1');
-    final result = await showDialog<bool>(context: context, builder: (_) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
-      title: const Text('Consumo del propietario'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: person, decoration: const InputDecoration(labelText: 'Quién consumió')),
-        DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Producto'), items: products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name))).toList(), onChanged: (v) => setDialogState(() => selected = v)),
-        TextField(controller: qty, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cantidad de unidades')),
-      ]),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar'))],
-    )));
-    if (result == true && selected != null) {
-      final p = products.firstWhere((x) => x.name == selected);
-      final quantity = int.tryParse(qty.text) ?? 0;
-      final value = quantity * p.price;
-      if (quantity > 0 && quantity <= p.freezerUnits && person.text.trim().isNotEmpty) {
-        setState(() {
-          p.freezerUnits -= quantity;
-          consumptions.add(Consumption(person.text.trim(), p.name, quantity, value, DateTime.now()));
-        });
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verifica persona, cantidad y existencia en freezer.')));
-      }
-    }
-    person.dispose(); qty.dispose();
-  }
-
-  Future<void> closeDay() async {
-    final remaining = <String, int>{for (final p in products) p.name: p.freezerUnits};
-    final controllers = <String, TextEditingController>{for (final p in products) p.name: TextEditingController(text: p.freezerUnits.toString())};
-
-    final confirmed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ClosingPage(products: products, controllers: controllers, onSave: (counts) {
-      remaining
-        ..clear()
-        ..addAll(counts);
-    })));
-    for (final c in controllers.values) c.dispose();
-    if (confirmed != true || !mounted) return;
-
-    int sales = 0;
-    int unitsSold = 0;
-    for (final p in products) {
-      final finalCount = remaining[p.name] ?? p.freezerUnits;
-      final sold = p.freezerUnits - finalCount;
-      if (sold > 0) {
-        p.freezerUnits = finalCount;
-        saleUnits[p.name] = (saleUnits[p.name] ?? 0) + sold;
-        unitsSold += sold;
-        sales += sold * p.price;
-      }
-    }
-    lastSales = sales;
-    final loanTotal = loans.fold<int>(0, (s, l) => s + l.amount);
-    final consumptionTotal = consumptions.fold<int>(0, (s, c) => s + c.value);
-    lastExpectedCash = sales - loanTotal - consumptionTotal;
-
-    final actual = await askActualCash(lastExpectedCash, unitsSold, sales, loanTotal, consumptionTotal);
-    if (actual == null || !mounted) return;
-    lastActualCash = actual;
-    lastDifference = actual - lastExpectedCash;
-    await showArqueoSummary(sales, loanTotal, consumptionTotal, lastExpectedCash, actual, lastDifference);
-    if (!mounted) return;
-    await refillFreezers();
-  }
-
-  Future<int?> askActualCash(int expected, int units, int sales, int loansTotal, int consumptionTotal) async {
-    final c = TextEditingController();
-    return showDialog<int>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Arqueo de jornada'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Unidades vendidas: $units'),
-        Text('Ventas: C\$${NumberFormat('#,##0').format(sales)}'),
-        Text('Préstamos/retiros: - C\$${NumberFormat('#,##0').format(loansTotal)}'),
-        Text('Consumos: - C\$${NumberFormat('#,##0').format(consumptionTotal)}'),
-        const SizedBox(height: 12),
-        Text('Efectivo esperado: C\$${NumberFormat('#,##0').format(expected)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-        TextField(controller: c, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Efectivo contado en caja')),
-      ]),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, int.tryParse(c.text)), child: const Text('Confirmar arqueo'))],
-    ));
-  }
-
-  Future<void> showArqueoSummary(int sales, int loansTotal, int consumptionTotal, int expected, int actual, int difference) async {
-    final label = difference == 0 ? 'Exacto' : difference < 0 ? 'Faltante' : 'Sobrante';
-    await showDialog<void>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Arqueo final'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Ventas: C\$${NumberFormat('#,##0').format(sales)}'),
-        Text('Préstamos/retiros: C\$${NumberFormat('#,##0').format(loansTotal)}'),
-        Text('Consumos: C\$${NumberFormat('#,##0').format(consumptionTotal)}'),
-        const Divider(),
-        Text('Esperado: C\$${NumberFormat('#,##0').format(expected)}'),
-        Text('Contado: C\$${NumberFormat('#,##0').format(actual)}'),
-        const SizedBox(height: 8),
-        Text('$label: C\$${NumberFormat('#,##0').format(difference.abs())}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      ]),
-      actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Continuar a Rellenar Freezer'))],
-    ));
-  }
-
-  Future<void> refillFreezers() async {
-    for (final p in products) {
-      if (!mounted) return;
-      final c = TextEditingController(text: '0');
-      final add = await showDialog<int>(context: context, builder: (_) => AlertDialog(title: Text('Rellenar: ${p.name}'), content: TextField(controller: c, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Unidades a sacar de bodega', helperText: 'Freezer actual: ${p.freezerUnits} unidades')), actions: [TextButton(onPressed: () => Navigator.pop(context, 0), child: const Text('Omitir')), FilledButton(onPressed: () => Navigator.pop(context, int.tryParse(c.text) ?? 0), child: const Text('Agregar'))]));
-      c.dispose();
-      if (add == null || add < 0) return;
-      if (add > p.warehouseUnits) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No hay suficientes unidades de ${p.name} en bodega.')));
-        return;
-      }
-      if (add > 0) setState(() { p.warehouseUnits -= add; p.freezerUnits += add; movements.add(Movement(p.name, add, DateTime.now())); });
-    }
-    if (mounted) {
-      setState(() => dayClosed = true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jornada cerrada y freezer preparado para el siguiente día.')));
-    }
-  }
-}
-
-class ClosingPage extends StatefulWidget {
-  final List<Product> products;
-  final Map<String, TextEditingController> controllers;
-  final void Function(Map<String, int>) onSave;
-  const ClosingPage({super.key, required this.products, required this.controllers, required this.onSave});
-  @override
-  State<ClosingPage> createState() => _ClosingPageState();
-}
-
-class _ClosingPageState extends State<ClosingPage> {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Cierre de jornada')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Inventario final del freezer', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        const Text('Registra en cada tarjeta cuántas unidades quedan. El sistema calculará las ventas automáticamente.'),
-        const SizedBox(height: 16),
-        ...widget.products.map((p) => Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [Expanded(child: Text(p.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))), Text('C\$${p.price}')]),
-          const SizedBox(height: 8),
-          Text('Inicio disponible: ${p.freezerUnits} unidades'),
-          const SizedBox(height: 8),
-          TextField(controller: widget.controllers[p.name], keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Unidades que quedan en freezer', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          ValueListenableBuilder<TextEditingValue>(valueListenable: widget.controllers[p.name]!, builder: (_, value, __) {
-            final finalCount = int.tryParse(value.text) ?? p.freezerUnits;
-            final sold = (p.freezerUnits - finalCount).clamp(0, p.freezerUnits);
-            return Text('Venta calculada: $sold unidades  •  C\$${NumberFormat('#,##0').format(sold * p.price)}', style: const TextStyle(fontWeight: FontWeight.w600));
-          }),
-        ]))))),
-        const SizedBox(height: 20),
-        FilledButton.icon(onPressed: () {
-          final counts = <String, int>{};
-          for (final p in widget.products) {
-            final value = int.tryParse(widget.controllers[p.name]!.text);
-            if (value == null || value < 0 || value > p.freezerUnits) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cantidad inválida en ${p.name}.')));
-              return;
-            }
-            counts[p.name] = value;
-          }
-          widget.onSave(counts);
-          Navigator.pop(context, true);
-        }, icon: const Icon(Icons.check_circle_outline), label: const Text('Confirmar inventario y continuar al arqueo')),
-        const SizedBox(height: 24),
-      ]),
-    );
-  }
-}
-
-class HistoryPage extends StatelessWidget {
-  const HistoryPage({super.key});
-  @override
-  Widget build(BuildContext context) => const ListView(padding: EdgeInsets.all(16), children: [Text('Historial', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), SizedBox(height: 8), Text('La estructura de historial y reportes PDF se implementará en la siguiente fase de persistencia.')]);
+class PdfReport{
+ static Future<void> generate(List<DayRecord> records,String month)async{final doc=pw.Document();for(final period in [records.where((r)=>r.date.day<=15).toList(),records.where((r)=>r.date.day>=16).toList()]){doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,build:(_){final sales=period.fold(0,(s,r)=>s+r.sales),loans=period.fold(0,(s,r)=>s+r.loans.fold(0,(a,x)=>a+x.amount)),cons=period.fold(0,(s,r)=>s+r.consumptions.fold(0,(a,x)=>a+x.value)),expected=period.fold(0,(s,r)=>s+r.expected),actual=period.fold(0,(s,r)=>s+r.actual);return[pw.Header(level:0,child:pw.Text('Inventario Billar')),pw.Text('Mes $month • ${period.isNotEmpty&&period.first.date.day<=15?'Días 1–15':'Días 16–fin'}'),pw.SizedBox(height:10),pw.Table.fromTextArray(headers:['Fecha','Ventas','Préstamos','Consumos','Esperado','Contado','Dif.'],data:period.map((r)=>[DateFormat('dd/MM/yyyy').format(r.date),'C\$${r.sales}','C\$${r.loans.fold(0,(s,x)=>s+x.amount)}','C\$${r.consumptions.fold(0,(s,x)=>s+x.value)}','C\$${r.expected}','C\$${r.actual}','C\$${r.difference}']).toList()),pw.SizedBox(height:12),pw.Text('Resumen: Ventas C\$$sales • Préstamos C\$$loans • Consumos C\$$cons • Esperado C\$$expected • Contado C\$$actual')];}));}final bytes=await doc.save();await Printing.sharePdf(bytes:bytes,filename:'Inventario-Billar-$month.pdf');}
 }
