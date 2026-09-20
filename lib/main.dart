@@ -7,7 +7,7 @@ import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'extra_features.dart';
 
-void main()=>runApp(const App());
+void main() => runApp(const App());
 class Product{final String name;final int price,packSize;int warehouse,freezer;Product(this.name,this.price,this.packSize,{this.warehouse=0,this.freezer=0});Map<String,dynamic> j()=>{'name':name,'warehouse':warehouse,'freezer':freezer};}
 class Loan{final String person,reason;final int amount;final DateTime date;Loan(this.person,this.amount,this.reason,this.date);Map<String,dynamic> j()=>{'person':person,'amount':amount,'reason':reason,'date':date.toIso8601String()};}
 class Consumption{final String person,product;final int quantity,value;final DateTime date;Consumption(this.person,this.product,this.quantity,this.value,this.date);Map<String,dynamic> j()=>{'person':person,'product':product,'quantity':quantity,'value':value,'date':date.toIso8601String()};}
