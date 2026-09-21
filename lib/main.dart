@@ -42,8 +42,212 @@ class _InitialSetupState extends State<InitialSetupPage>{late final Map<String,T
 class OpenDayPage extends StatefulWidget{final List<Product> products;final Map<String,int> expected;const OpenDayPage(this.products,this.expected,{super.key});@override State<OpenDayPage> createState()=>_OpenDayState();}
 class _OpenDayState extends State<OpenDayPage>{final checked=<String,bool>{};@override void initState(){super.initState();for(final p in widget.products)checked[p.name]=false;}bool get allChecked=>checked.values.every((v)=>v);@override Widget build(BuildContext x)=>Scaffold(appBar:AppBar(title:const Text('Abrir jornada')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Verificación inicial del freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),const SizedBox(height:8),const Text('Confirma con un check cada producto después de comprobar físicamente las unidades indicadas.'),const SizedBox(height:12),...widget.products.map((p)=>Card(child:CheckboxListTile(value:checked[p.name]??false,onChanged:(v)=>setState(()=>checked[p.name]=v??false),title:Text(p.name,style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('Hay ${widget.expected[p.name]??0} unidades en freezer'),secondary:CircleAvatar(child:Text('${widget.expected[p.name]??0}'))))),const SizedBox(height:12),FilledButton.icon(onPressed:allChecked?()=>Navigator.pop(x,true):null,icon:const Icon(Icons.lock_open),label:const Text('Confirmar y abrir jornada'))]));}
 class CloseResult{final Map<String,int> beer,cigarettes;CloseResult(this.beer,this.cigarettes);}
-class ClosePage extends StatefulWidget{final List<Product> p;final Map<String,TextEditingController> c;final Map<String,int> o;final List<Map<String,dynamic>> cigs;const ClosePage(this.p,this.c,this.o,this.cigs,{super.key});@override State<ClosePage> createState()=>_CloseState();}
-class _CloseState extends State<ClosePage>{late final Map<String,TextEditingController> cigC;@override void initState(){super.initState();cigC={for(final z in widget.cigs)z['name'].toString():TextEditingController(text:'${z['stock']??0}')};}@override void dispose(){for(final c in cigC.values)c.dispose();super.dispose();}@override Widget build(BuildContext x)=>Scaffold(appBar:AppBar(title:const Text('Cierre de jornada')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Inventario final',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),const SizedBox(height:8),...widget.p.map((z)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(z.name,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text('Esperado al abrir: ${widget.o[z.name]??0} • Disponible: ${z.freezer}'),TextField(controller:widget.c[z.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades que quedan')),ValueListenableBuilder<TextEditingValue>(valueListenable:widget.c[z.name]!,builder:(_,v,__){final n=int.tryParse(v.text)??0;final sold=(z.freezer-n).clamp(0,z.freezer);return Text('Venta calculada: $sold unidades • C\${sold*z.price}',style:const TextStyle(fontWeight:FontWeight.bold));})])))),if(widget.cigs.isNotEmpty)const Padding(padding:EdgeInsets.only(top:8,bottom:4),child:Text('Cigarros',style:TextStyle(fontSize:20,fontWeight:FontWeight.bold)),...widget.cigs.map((z)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(z['name'].toString(),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text('Existencia disponible: ${z['stock']??0}'),TextField(controller:cigC[z['name'].toString()],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades que quedan')),ValueListenableBuilder<TextEditingValue>(valueListenable:cigC[z['name'].toString()]!,builder:(_,v,__){final current=int.tryParse(v.text)??0;final opening=int.tryParse('${z['opening']??0}')??0;final entries=int.tryParse('${z['entries']??0}')??0;final sold=(opening+entries-current).clamp(0,999999);final price=int.tryParse('${z['price']??0}')??0;return Text('Venta calculada: $sold unidades • C\$${sold*price}',style:const TextStyle(fontWeight:FontWeight.bold));})})])))),FilledButton(onPressed:(){final r=<String,int>{};for(final z in widget.p){final n=int.tryParse(widget.c[z.name]!.text)??-1;if(n<0||n>z.freezer)return;r[z.name]=n;}final cr=<String,int>{};for(final z in widget.cigs){final name=z['name'].toString();final n=int.tryParse(cigC[name]!.text)??-1;final stock=int.tryParse('${z['stock']??0}')??0;if(n<0||n>stock)return;cr[name]=n;}Navigator.pop(x,CloseResult(r,cr));},child:const Text('Confirmar y continuar al arqueo'))]));}
+class ClosePage extends StatefulWidget {
+  final List<Product> p;
+  final Map<String, TextEditingController> c;
+  final Map<String, int> o;
+  final List<Map<String, dynamic>> cigs;
+
+  const ClosePage(this.p, this.c, this.o, this.cigs, {super.key});
+
+  @override
+  State<ClosePage> createState() => _CloseState();
+}
+
+class _CloseState extends State<ClosePage> {
+  late final Map<String, TextEditingController> cigC;
+
+  @override
+  void initState() {
+    super.initState();
+    cigC = {
+      for (final z in widget.cigs)
+        z['name'].toString(): TextEditingController(
+          text: '${z['stock'] ?? 0}',
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final controller in cigC.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final children = <Widget>[
+      const Text(
+        'Inventario final',
+        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 8),
+    ];
+
+    children.addAll(
+      widget.p.map(
+        (product) => Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Esperado al abrir: ${widget.o[product.name] ?? 0} • '
+                  'Disponible: ${product.freezer}',
+                ),
+                TextField(
+                  controller: widget.c[product.name]!,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Unidades que quedan',
+                  ),
+                ),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.c[product.name]!,
+                  builder: (_, value, __) {
+                    final remaining = int.tryParse(value.text) ?? 0;
+                    final sold = (product.freezer - remaining)
+                        .clamp(0, product.freezer);
+                    return Text(
+                      'Venta calculada: $sold unidades • C\\$${sold * product.price}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (widget.cigs.isNotEmpty) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(top: 8, bottom: 4),
+          child: Text(
+            'Cigarros',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+
+      children.addAll(
+        widget.cigs.map(
+          (cigarette) {
+            final name = cigarette['name'].toString();
+            final controller = cigC[name]!;
+
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Existencia disponible: ${cigarette['stock'] ?? 0}',
+                    ),
+                    TextField(
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Unidades que quedan',
+                      ),
+                    ),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: controller,
+                      builder: (_, value, __) {
+                        final current = int.tryParse(value.text) ?? 0;
+                        final opening =
+                            int.tryParse('${cigarette['opening'] ?? 0}') ?? 0;
+                        final entries =
+                            int.tryParse('${cigarette['entries'] ?? 0}') ?? 0;
+                        final sold = (opening + entries - current)
+                            .clamp(0, 999999);
+                        final price =
+                            int.tryParse('${cigarette['price'] ?? 0}') ?? 0;
+
+                        return Text(
+                          'Venta calculada: $sold unidades • C\\$${sold * price}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    children.add(
+      FilledButton(
+        onPressed: () {
+          final result = <String, int>{};
+
+          for (final product in widget.p) {
+            final remaining =
+                int.tryParse(widget.c[product.name]!.text) ?? -1;
+            if (remaining < 0 || remaining > product.freezer) {
+              return;
+            }
+            result[product.name] = remaining;
+          }
+
+          final cigaretteResult = <String, int>{};
+
+          for (final cigarette in widget.cigs) {
+            final name = cigarette['name'].toString();
+            final remaining = int.tryParse(cigC[name]!.text) ?? -1;
+            final available =
+                int.tryParse('${cigarette['stock'] ?? 0}') ?? 0;
+
+            if (remaining < 0 || remaining > available) {
+              return;
+            }
+            cigaretteResult[name] = remaining;
+          }
+
+          Navigator.pop(
+            context,
+            CloseResult(result, cigaretteResult),
+          );
+        },
+        child: const Text('Confirmar y continuar al arqueo'),
+      ),
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Cierre de jornada')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: children,
+      ),
+    );
+  }
+}
+
 class CashPage extends StatefulWidget{final int sales,loans,cons,adjustments,expected;const CashPage(this.sales,this.loans,this.cons,this.adjustments,this.expected,{super.key});@override State<CashPage> createState()=>_CashState();}
 class _CashState extends State<CashPage>{final c=TextEditingController();@override Widget build(BuildContext x){final a=int.tryParse(c.text),d=a==null?null:a-widget.expected;return Scaffold(appBar:AppBar(title:const Text('Arqueo')),body:ListView(padding:const EdgeInsets.all(20),children:[Text('Venta total del día: C\${widget.sales}'),Text('Préstamos/retiros: - C\${widget.loans}'),Text('Consumos: - C\${widget.cons}'),Text('Gastos y pedidos pagados: - C\${widget.adjustments}'),const SizedBox(height:12),Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Efectivo esperado después de las deducciones',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),const SizedBox(height:6),Text('C\${widget.expected}',style:const TextStyle(fontSize:26,fontWeight:FontWeight.bold))])),),const SizedBox(height:12),TextField(controller:c,onChanged:(_)=>setState((){}),keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Efectivo contado',border:OutlineInputBorder())),if(d!=null)Text(d==0?'Exacto':d<0?'Faltante: C\${d.abs()}':'Sobrante: C\${d.abs()}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),FilledButton(onPressed:a==null?null:()=>Navigator.pop(x,a),child:const Text('Confirmar arqueo'))]));}}
 class RefillPage extends StatelessWidget{final List<Product> p;const RefillPage(this.p,{super.key});@override Widget build(BuildContext x){final c={for(final z in p)z.name:TextEditingController(text:'0')};return Scaffold(appBar:AppBar(title:const Text('Rellenar Freezer')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Última acción de la jornada',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...p.map((z)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(z.name,style:const TextStyle(fontWeight:FontWeight.bold)),Text('Bodega: ${z.warehouse} • Freezer: ${z.freezer}'),TextField(controller:c[z.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades a sacar de bodega'))])))),FilledButton(onPressed:(){final r=<String,int>{};for(final z in p){final n=int.tryParse(c[z.name]!.text)??0;if(n<0||n>z.warehouse)return;r[z.name]=n;}Navigator.pop(x,r);},child:const Text('Confirmar y cerrar jornada'))]));}}
