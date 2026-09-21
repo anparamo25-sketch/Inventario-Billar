@@ -35,7 +35,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver{int tab=0;bool 
  Future<void> move(Product p)async{final c=TextEditingController();final v=await showDialog<int>(context:context,builder:(_)=>AlertDialog(title:Text('Pasar ${p.name}'),content:TextField(controller:c,keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Unidades',helperText:'Disponible: ${p.warehouse}')),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,int.tryParse(c.text)??0),child:const Text('Trasladar'))]));c.dispose();if(v==null||v<=0||v>p.warehouse)return;if(mounted)await change((){p.warehouse-=v;p.freezer+=v;mov.add(Movement(p.name,v,DateTime.now()));});}
  Future<void> addLoan()async{final a=TextEditingController(),m=TextEditingController(),r=TextEditingController();final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Préstamo / retiro'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:a,decoration:const InputDecoration(labelText:'Persona')),TextField(controller:m,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Monto C\$')),TextField(controller:r,decoration:const InputDecoration(labelText:'Motivo'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&(int.tryParse(m.text)??0)>0&&a.text.trim().isNotEmpty)await change(()=>loans.add(Loan(a.text.trim(),int.parse(m.text),r.text.trim(),DateTime.now())));a.dispose();m.dispose();r.dispose();}
  Future<void> addConsumption()async{String? sel;final who=TextEditingController(),q=TextEditingController(text:'1');final ok=await showDialog<bool>(context:context,builder:(_)=>StatefulBuilder(builder:(c,setD)=>AlertDialog(title:const Text('Consumo del propietario'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:who,decoration:const InputDecoration(labelText:'Quién')),DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Producto'),items:ps.map((p)=>DropdownMenuItem(value:p.name,child:Text(p.name))).toList(),onChanged:(v)=>setD(()=>sel=v)),TextField(controller:q,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Cantidad'))]),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Guardar'))])));if(ok==true&&sel!=null){final p=ps.firstWhere((x)=>x.name==sel);final n=int.tryParse(q.text)??0;if(n>0&&n<=p.freezer&&who.text.trim().isNotEmpty)await change((){p.freezer-=n;cons.add(Consumption(who.text.trim(),p.name,n,n*p.price,DateTime.now()));});}who.dispose();q.dispose();}
- Future<void> closeDay()async{final cs={for(final p in ps)p.name:TextEditingController(text:'${p.freezer}')};final cigs=await FeatureStore.cigarettesForClose();final counts=await Navigator.push<CloseResult>(context,MaterialPageRoute(builder:(_)=>ClosePage(ps,cs,opening,cigs)));for(final c in cs.values)c.dispose();if(counts==null)return;final sold=<String,int>{};int sales=0;for(final p in ps){final n=counts.beer[p.name]!;final s=p.freezer-n;if(s<0)return;p.freezer=n;if(s>0){sold[p.name]=s;sales+=s*p.price;}}await FeatureStore.setCigaretteClosing(counts.cigarettes);final feature=await FeatureStore.summary();final lt=loans.fold(0,(s,x)=>s+x.amount),ct=cons.fold(0,(s,x)=>s+x.value);final dailySales=sales+feature.cigaretteSales;final expected=dailySales-lt-ct-feature.expensesTotal;final actual=await Navigator.push<int>(context,MaterialPageRoute(builder:(_)=>CashPage(dailySales,lt,ct,feature.expensesTotal,expected)));if(actual==null)return;final diff=actual-expected;await showDialog(context:context,barrierDismissible:false,builder:(_)=>AlertDialog(title:const Text('Arqueo final'),content:Text(diff==0?'Exacto: C\$0':diff<0?'Faltante: C\$\${diff.abs()}':'Sobrante: C\$\${diff.abs()}'),actions:[FilledButton(onPressed:()=>Navigator.pop(context),child:const Text('Continuar'))]));final refill=await Navigator.push<Map<String,int>>(context,MaterialPageRoute(builder:(_)=>RefillPage(ps)));if(refill==null)return;final pre={for(final p in ps)p.name:p.freezer};await change((){for(final p in ps){final n=refill[p.name]??0;p.warehouse-=n;p.freezer+=n;if(n>0)mov.add(Movement(p.name,n,DateTime.now(),type:'Bodega → Freezer (Relleno)'));}H.add(Day(date:dayDate,opening:Map.from(opening),finalStock:pre,sold:sold,refill:Map.from(refill),loans:List.from(loans),consumptions:List.from(cons),movements:List.from(mov),sales:dailySales,expenses:feature.expensesTotal,expected:expected,actual:actual,difference:diff));lastSales=sales+feature.cigaretteSales;lastExpected=expected;opening..clear()..addEntries(ps.map((p)=>MapEntry(p.name,p.freezer)));loans.clear();cons.clear();mov.clear();closed=true;jornadaAbierta=false;});await PdfReport.autoQuincenaIfNeeded(dayDate,List.from(H));await FeatureStore.resetDay();}
+ Future<void> closeDay()async{final cs={for(final p in ps)p.name:TextEditingController(text:'${p.freezer}')};final cigs=await FeatureStore.cigarettesForClose();final counts=await Navigator.push<CloseResult>(context,MaterialPageRoute(builder:(_)=>ClosePage(ps,cs,opening,cigs)));for(final c in cs.values)c.dispose();if(counts==null)return;final sold=<String,int>{};int sales=0;for(final p in ps){final n=counts.beer[p.name]!;final s=p.freezer-n;if(s<0)return;p.freezer=n;if(s>0){sold[p.name]=s;sales+=s*p.price;}}await FeatureStore.setCigaretteClosing(counts.cigarettes);final feature=await FeatureStore.summary();final lt=loans.fold(0,(s,x)=>s+x.amount),ct=cons.fold(0,(s,x)=>s+x.value);final dailySales=sales+feature.cigaretteSales;final expected=dailySales-lt-ct-feature.expensesTotal;final actual=await Navigator.push<int>(context,MaterialPageRoute(builder:(_)=>CashPage(dailySales,lt,ct,feature.expensesTotal,expected)));if(actual==null)return;final diff=actual-expected;await showDialog(context:context,barrierDismissible:false,builder:(_)=>AlertDialog(title:const Text('Arqueo final'),content:Text(diff==0?'Exacto: C\$0':diff<0?'Faltante: C\$\${diff.abs()}':'Sobrante: C\$\${diff.abs()}'),actions:[FilledButton(onPressed:()=>Navigator.pop(context),child:const Text('Continuar'))]));final refill=await Navigator.push<Map<String,int>>(context,MaterialPageRoute(builder:(_)=>RefillPage(ps)));if(refill==null)return;final pre={for(final p in ps)p.name:p.freezer};await change((){for(final p in ps){final n=refill[p.name]??0;p.warehouse-=n;p.freezer+=n;if(n>0)mov.add(Movement(p.name,n,DateTime.now(),type:'Bodega → Freezer (Relleno)'));}H.add(Day(date:dayDate,opening:Map.from(opening),finalStock:pre,sold:sold,refill:Map.from(refill),loans:List.from(loans),consumptions:List.from(cons),movements:List.from(mov),sales:dailySales,expenses:feature.expensesTotal,expected:expected,actual:actual,difference:diff));lastSales=sales+feature.cigaretteSales;lastExpected=expected;opening..clear()..addEntries(ps.map((p)=>MapEntry(p.name,p.freezer)));loans.clear();cons.clear();mov.clear();closed=true;jornadaAbierta=false;});await PdfReport.autoGenerateIfCutoff(dayDate,List.from(H));await FeatureStore.resetDay();}
 }
 }
 class InitialSetupPage extends StatefulWidget{final List<Product> products;final VoidCallback onSaved;const InitialSetupPage({super.key,required this.products,required this.onSaved});@override State<InitialSetupPage> createState()=>_InitialSetupState();}
@@ -53,10 +53,15 @@ class _HistoryState extends State<History>{String? month;@override Widget build(
 class PdfReport {
   static Future<void> makeMonth(List<Day> days, String month) async {
     final document = pw.Document();
-    await _addPeriod(document, days.where((d) => d.date.day <= 15).toList(), month, 1);
-    await _addPeriod(document, days.where((d) => d.date.day >= 16).toList(), month, 2);
-    if (document.pages.isEmpty) return;
-    await Printing.sharePdf(bytes: await document.save(), filename: 'Inventario-Billar-${month}.pdf');
+    final first = days.where((d) => d.date.day <= 15).toList();
+    final second = days.where((d) => d.date.day >= 16).toList();
+    await _addPeriod(document, first, month, 1);
+    await _addPeriod(document, second, month, 2);
+    if (first.isEmpty && second.isEmpty) return;
+    await Printing.sharePdf(
+      bytes: await document.save(),
+      filename: 'Inventario-Billar-$month.pdf',
+    );
   }
 
   static Future<void> makeQuincena(List<Day> days, String month, int q) async {
@@ -64,68 +69,97 @@ class PdfReport {
     if (period.isEmpty) return;
     final document = pw.Document();
     await _addPeriod(document, period, month, q);
-    await Printing.sharePdf(bytes: await document.save(), filename: 'Inventario-Billar-${month}-Q${q}.pdf');
+    await Printing.sharePdf(
+      bytes: await document.save(),
+      filename: 'Inventario-Billar-$month-Q$q.pdf',
+    );
   }
 
-  static Future<void> _addPeriod(pw.Document document, List<Day> period, String month, int q) async {
+  static Future<void> _addPeriod(
+    pw.Document document,
+    List<Day> period,
+    String month,
+    int q,
+  ) async {
     if (period.isEmpty) return;
     final first = period.map((d) => d.date).reduce((a, b) => a.isBefore(b) ? a : b);
     final last = period.map((d) => d.date).reduce((a, b) => a.isAfter(b) ? a : b);
     final start = DateTime(first.year, first.month, q == 1 ? 1 : 16);
-    final end = q == 1 ? DateTime(first.year, first.month, 16) : DateTime(first.year, first.month + 1, 1);
-    final orders = await FeatureStore.ordersForPeriod(start, end);
-    final orderTotal = orders.fold<int>(0, (s, o) => s + (int.tryParse('${o['paid'] ?? 0}') ?? 0));
-    final sales = period.fold<int>(0, (s, d) => s + d.sales);
-    final expenses = period.fold<int>(0, (s, d) => s + d.expenses);
-    final consumptions = period.fold<int>(0, (s, d) => s + d.consumptions.fold<int>(0, (a, x) => a + x.value));
-    final loans = period.fold<int>(0, (s, d) => s + d.loans.fold<int>(0, (a, x) => a + x.amount));
+    final orders = await FeatureStore.ordersForPeriod(
+      start,
+      q == 1 ? DateTime(first.year, first.month, 16) : DateTime(first.year, first.month + 1, 1),
+    );
+    final orderTotal = orders.fold<int>(
+      0,
+      (sum, order) => sum + (int.tryParse('${order['paid'] ?? 0}') ?? 0),
+    );
+    final sales = period.fold<int>(0, (sum, d) => sum + d.sales);
+    final expenses = period.fold<int>(0, (sum, d) => sum + d.expenses);
+    final consumptions = period.fold<int>(
+      0,
+      (sum, d) => sum + d.consumptions.fold<int>(0, (s, x) => s + x.value),
+    );
+    final loans = period.fold<int>(
+      0,
+      (sum, d) => sum + d.loans.fold<int>(0, (s, x) => s + x.amount),
+    );
     final distributable = sales - orderTotal;
     final share = distributable ~/ 5;
 
-    document.addPage(pw.MultiPage(
-      build: (_) => [
-        pw.Header(level: 0, child: pw.Text('Inventario Billar — Corte quincenal')),
-        pw.Text('Mes ${month} • ${q == 1 ? 'Días 1–15' : 'Días 16–fin'}'),
-        pw.Text('Período: ${DateFormat('dd/MM/yyyy').format(start)} al ${DateFormat('dd/MM/yyyy').format(last)}'),
-        pw.SizedBox(height: 10),
-        pw.TableHelper.fromTextArray(
-          headers: ['Fecha', 'Ventas', 'Gastos', 'Pedidos', 'Consumos', 'Préstamos'],
-          data: period.map((d) {
-            final dayStart = DateTime(d.date.year, d.date.month, d.date.day);
-            final dayEnd = dayStart.add(const Duration(days: 1));
-            final dailyOrders = orders.where((o) {
-              final od = DateTime.tryParse('${o['date'] ?? ''}');
-              return od != null && !od.isBefore(dayStart) && od.isBefore(dayEnd);
-            }).fold<int>(0, (s, o) => s + (int.tryParse('${o['paid'] ?? 0}') ?? 0));
-            return [
-              DateFormat('dd/MM/yyyy').format(d.date),
-              'C\$${d.sales}',
-              'C\$${d.expenses}',
-              'C\$${dailyOrders}',
-              'C\$${d.consumptions.fold<int>(0, (s, x) => s + x.value)}',
-              'C\$${d.loans.fold<int>(0, (s, x) => s + x.amount)}',
-            ];
-          }).toList(),
-        ),
-        pw.SizedBox(height: 14),
-        pw.Text('Ventas totales: C\$${sales}'),
-        pw.Text('Gastos totales: C\$${expenses}'),
-        pw.Text('Consumos totales: C\$${consumptions}'),
-        pw.Text('Préstamos totales: C\$${loans}'),
-        pw.SizedBox(height: 8),
-        pw.Text('Pedidos pagados de la quincena: C\$${orderTotal}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-        pw.Text('Total después de deducir pedidos: C\$${distributable}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-        pw.Text('Distribución entre 5 socios: C\$${share} por socio', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-      ],
-    ));
+    document.addPage(
+      pw.MultiPage(
+        build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Inventario Billar — Corte quincenal')),
+          pw.Text('Mes $month • ${q == 1 ? 'Días 1–15' : 'Días 16–fin'}'),
+          pw.Text('Período: ${DateFormat('dd/MM/yyyy').format(start)} al ${DateFormat('dd/MM/yyyy').format(last)}'),
+          pw.SizedBox(height: 10),
+          pw.TableHelper.fromTextArray(
+            headers: ['Fecha', 'Ventas', 'Gastos', 'Pedidos', 'Consumos', 'Préstamos'],
+            data: period.map((d) {
+              final dayStart = DateTime(d.date.year, d.date.month, d.date.day);
+              final dayEnd = dayStart.add(const Duration(days: 1));
+              final dailyOrders = orders.where((o) {
+                final od = DateTime.tryParse('${o['date'] ?? ''}');
+                return od != null && !od.isBefore(dayStart) && od.isBefore(dayEnd);
+              }).fold<int>(
+                0,
+                (sum, o) => sum + (int.tryParse('${o['paid'] ?? 0}') ?? 0),
+              );
+              return [
+                DateFormat('dd/MM/yyyy').format(d.date),
+                'C\${d.sales}',
+                'C\${d.expenses}',
+                'C\${dailyOrders}',
+                'C\${d.consumptions.fold<int>(0, (s, x) => s + x.value)}',
+                'C\${d.loans.fold<int>(0, (s, x) => s + x.amount)}',
+              ];
+            }).toList(),
+          ),
+          pw.SizedBox(height: 14),
+          pw.Text('Ventas totales: C\$$sales'),
+          pw.Text('Gastos totales: C\$$expenses'),
+          pw.Text('Consumos totales: C\$$consumptions'),
+          pw.Text('Préstamos totales: C\$$loans'),
+          pw.SizedBox(height: 8),
+          pw.Text('Pedidos pagados de la quincena: C\$$orderTotal',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Text('Total después de deducir pedidos: C\$$distributable',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Text('Distribución entre 5 socios: C\$$share por socio',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   static Future<void> autoGenerateIfCutoff(DateTime date, List<Day> days) async {
     final lastDay = DateTime(date.year, date.month + 1, 0).day;
-    final q = date.day == 15 ? 1 : date.day == lastDay ? 2 : 0;
+    final q = date.day == 15 ? 1 : (date.day == lastDay ? 2 : 0);
     if (q == 0) return;
     final month = DateFormat('yyyy-MM').format(date);
     final period = days.where((d) => q == 1 ? d.date.day <= 15 : d.date.day >= 16).toList();
-    if (period.isNotEmpty) await makeQuincena(period, month, q);
+    if (period.isNotEmpty) {
+      await makeQuincena(period, month, q);
+    }
   }
 }
