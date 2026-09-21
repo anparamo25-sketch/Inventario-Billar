@@ -59,7 +59,7 @@ class PdfReport {
     if (first.isEmpty && second.isEmpty) return;
     await Printing.sharePdf(
       bytes: await document.save(),
-      filename: 'Inventario-Billar-$month.pdf',
+      filename: 'Inventario-Billar-' + month + '.pdf',
     );
   }
 
@@ -70,7 +70,7 @@ class PdfReport {
     await _addPeriod(document, period, month, q);
     await Printing.sharePdf(
       bytes: await document.save(),
-      filename: 'Inventario-Billar-$month-Q$q.pdf',
+      filename: 'Inventario-Billar-' + month + '-Q' + q.toString() + '.pdf',
     );
   }
 
@@ -84,13 +84,14 @@ class PdfReport {
     final first = period.map((d) => d.date).reduce((a, b) => a.isBefore(b) ? a : b);
     final last = period.map((d) => d.date).reduce((a, b) => a.isAfter(b) ? a : b);
     final start = DateTime(first.year, first.month, q == 1 ? 1 : 16);
-    final orders = await FeatureStore.ordersForPeriod(
-      start,
-      q == 1 ? DateTime(first.year, first.month, 16) : DateTime(first.year, first.month + 1, 1),
-    );
+    final end = q == 1
+        ? DateTime(first.year, first.month, 16)
+        : DateTime(first.year, first.month + 1, 1);
+    final orders = await FeatureStore.ordersForPeriod(start, end);
+
     final orderTotal = orders.fold<int>(
       0,
-      (sum, order) => sum + (int.tryParse('${order['paid'] ?? 0}') ?? 0),
+      (sum, order) => sum + (int.tryParse('\${order['paid'] ?? 0}') ?? 0),
     );
     final sales = period.fold<int>(0, (sum, d) => sum + d.sales);
     final expenses = period.fold<int>(0, (sum, d) => sum + d.expenses);
@@ -108,9 +109,14 @@ class PdfReport {
     document.addPage(
       pw.MultiPage(
         build: (_) => [
-          pw.Header(level: 0, child: pw.Text('Inventario Billar — Corte quincenal')),
-          pw.Text('Mes $month • ${q == 1 ? 'Días 1–15' : 'Días 16–fin'}'),
-          pw.Text('Período: ${DateFormat('dd/MM/yyyy').format(start)} al ${DateFormat('dd/MM/yyyy').format(last)}'),
+          pw.Header(
+            level: 0,
+            child: pw.Text('Inventario Billar — Corte quincenal'),
+          ),
+          pw.Text('Mes \$month • \${q == 1 ? 'Días 1–15' : 'Días 16–fin'}'),
+          pw.Text(
+            'Período: \${DateFormat('dd/MM/yyyy').format(start)} al \${DateFormat('dd/MM/yyyy').format(last)}',
+          ),
           pw.SizedBox(height: 10),
           pw.TableHelper.fromTextArray(
             headers: ['Fecha', 'Ventas', 'Gastos', 'Pedidos', 'Consumos', 'Préstamos'],
@@ -118,34 +124,42 @@ class PdfReport {
               final dayStart = DateTime(d.date.year, d.date.month, d.date.day);
               final dayEnd = dayStart.add(const Duration(days: 1));
               final dailyOrders = orders.where((o) {
-                final od = DateTime.tryParse('${o['date'] ?? ''}');
-                return od != null && !od.isBefore(dayStart) && od.isBefore(dayEnd);
+                final od = DateTime.tryParse('\${o['date'] ?? ''}');
+                return od != null &&
+                    !od.isBefore(dayStart) &&
+                    od.isBefore(dayEnd);
               }).fold<int>(
                 0,
-                (sum, o) => sum + (int.tryParse('${o['paid'] ?? 0}') ?? 0),
+                (sum, o) => sum + (int.tryParse('\${o['paid'] ?? 0}') ?? 0),
               );
               return [
                 DateFormat('dd/MM/yyyy').format(d.date),
-                'C\${d.sales}',
-                'C\${d.expenses}',
-                'C\${dailyOrders}',
-                'C\${d.consumptions.fold<int>(0, (s, x) => s + x.value)}',
-                'C\${d.loans.fold<int>(0, (s, x) => s + x.amount)}',
+                'C\$__SALES__',
+                'C\$__EXPENSES__',
+                'C\$__DAILY_ORDERS__',
+                'C\$__CONSUMPTIONS__',
+                'C\$__LOANS__',
               ];
             }).toList(),
           ),
           pw.SizedBox(height: 14),
-          pw.Text('Ventas totales: C\$$sales'),
-          pw.Text('Gastos totales: C\$$expenses'),
-          pw.Text('Consumos totales: C\$$consumptions'),
-          pw.Text('Préstamos totales: C\$$loans'),
+          pw.Text('Ventas totales: C\$__SALES__'),
+          pw.Text('Gastos totales: C\$__EXPENSES__'),
+          pw.Text('Consumos totales: C\$__CONSUMPTIONS__'),
+          pw.Text('Préstamos totales: C\$__LOANS__'),
           pw.SizedBox(height: 8),
-          pw.Text('Pedidos pagados de la quincena: C\$$orderTotal',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.Text('Total después de deducir pedidos: C\$$distributable',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.Text('Distribución entre 5 socios: C\$$share por socio',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Text(
+            'Pedidos pagados de la quincena: C\$__ORDER_TOTAL__',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.Text(
+            'Total después de deducir pedidos: C\$__DISTRIBUTABLE__',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.Text(
+            'Distribución entre 5 socios: C\$__SHARE__ por socio',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
         ],
       ),
     );
@@ -156,7 +170,9 @@ class PdfReport {
     final q = date.day == 15 ? 1 : (date.day == lastDay ? 2 : 0);
     if (q == 0) return;
     final month = DateFormat('yyyy-MM').format(date);
-    final period = days.where((d) => q == 1 ? d.date.day <= 15 : d.date.day >= 16).toList();
+    final period = days.where(
+      (d) => q == 1 ? d.date.day <= 15 : d.date.day >= 16,
+    ).toList();
     if (period.isNotEmpty) {
       await makeQuincena(period, month, q);
     }
