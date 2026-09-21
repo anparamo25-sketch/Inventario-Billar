@@ -120,7 +120,7 @@ class _CloseState extends State<ClosePage> {
                     final sold = (product.freezer - remaining)
                         .clamp(0, product.freezer);
                     return Text(
-                      'Venta calculada: $sold unidades • C\\$${sold * product.price}',
+                      'Venta calculada: $sold unidades • C\$${sold * product.price}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     );
                   },
@@ -186,7 +186,7 @@ class _CloseState extends State<ClosePage> {
                             int.tryParse('${cigarette['price'] ?? 0}') ?? 0;
 
                         return Text(
-                          'Venta calculada: $sold unidades • C\\$${sold * price}',
+                          'Venta calculada: $sold unidades • C\$${sold * price}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                           ),

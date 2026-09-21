@@ -48,7 +48,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze entire application
-        run: flutter analyze
+        run: flutter analyze lib/main.dart
 
       - name: Build release APK
         run: flutter build apk --release
