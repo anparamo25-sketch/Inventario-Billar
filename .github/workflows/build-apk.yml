@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: inventario-billar-build
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Analyze and Build APK
+    name: Analyze, Build and Publish APK
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +36,14 @@ jobs:
             flutter create --platforms=android --project-name inventario_billar .
           fi
 
+      - name: Enable Android APK installation permission
+        shell: bash
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
+            sed -i '/<manifest[^>]*>/a\    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>' "$MANIFEST"
+          fi
+
       - name: Get dependencies
         run: flutter pub get
 
@@ -45,13 +53,38 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Rename APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk Inventario-Billar-release.apk
+      - name: Read application version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/^version: //p' pubspec.yaml | tr -d ' ')
+          BUILD="${VERSION##*+}"
+          VERSION_NAME="${VERSION%%+*}"
+          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APK for release
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk "Inventario-Billar-v${{ steps.version.outputs.version }}-build${{ steps.version.outputs.build }}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Inventario-Billar-release
-          path: Inventario-Billar-release.apk
+          path: Inventario-Billar-v${{ steps.version.outputs.version }}-build${{ steps.version.outputs.build }}.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release for in-app updates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          APK="Inventario-Billar-v${{ steps.version.outputs.version }}-build${{ steps.version.outputs.build }}.apk"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" "$APK"               --repo "${{ github.repository }}"               --title "Inventario Billar ${{ steps.version.outputs.version }}"               --notes "Versión ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build }}). Publicación oficial para actualización desde la aplicación."               --latest
+          fi
