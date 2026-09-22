@@ -36,11 +36,14 @@ jobs:
             flutter create --platforms=android --project-name inventario_billar .
           fi
 
-      - name: Enable Android APK installation permission
+      - name: Enable network and APK installation permissions
         shell: bash
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
+          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+            sed -i '/<manifest[^>]*>/a\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
+          fi
+          if ! grep -q "android.permission.REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
             sed -i '/<manifest[^>]*>/a\    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>' "$MANIFEST"
           fi
 
@@ -86,5 +89,9 @@ jobs:
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" --repo "${{ github.repository }}" --clobber
           else
-            gh release create "$TAG" "$APK"               --repo "${{ github.repository }}"               --title "Inventario Billar ${{ steps.version.outputs.version }}"               --notes "Versión ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build }}). Publicación oficial para actualización desde la aplicación."               --latest
+            gh release create "$TAG" "$APK" \
+              --repo "${{ github.repository }}" \
+              --title "Inventario Billar ${{ steps.version.outputs.version }}" \
+              --notes "Versión ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build }}). Publicación oficial para actualización desde la aplicación." \
+              --latest
           fi
