@@ -32,7 +32,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver{int tab=0;bool 
  Widget home(){final b=ps.fold(0,(s,p)=>s+p.warehouse),f=ps.fold(0,(s,p)=>s+p.freezer);return ListView(padding:const EdgeInsets.all(16),children:[Text('Resumen de hoy',style:Theme.of(context).textTheme.headlineSmall),Text(DateFormat('dd/MM/yyyy').format(dayDate)),if(!jornadaAbierta)Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Jornada pendiente de apertura',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),const SizedBox(height:8),const Text('Antes de comenzar, verifica las unidades de cada producto que deben estar en el freezer.'),const SizedBox(height:12),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:openDay,icon:const Icon(Icons.play_arrow),label:const Text('Abrir jornada')))]))),if(closed)Card(child:Padding(padding:const EdgeInsets.all(16),child:Row(children:[const Icon(Icons.check_circle),const SizedBox(width:10),Expanded(child:Text('Jornada cerrada y registrada.',style:const TextStyle(fontWeight:FontWeight.bold)))]))),Row(children:[Expanded(child:card('Bodega','$b unidades')),Expanded(child:card('Freezer','$f unidades'))]),if(jornadaAbierta)ListTile(title:const Text('Jornada abierta'),subtitle:const Text('El control de ventas y movimientos del día está activo.')),ListTile(title:const Text('Ventas último cierre'),trailing:Text('C\$$lastSales')),FilledButton.icon(onPressed:jornadaAbierta&&!closed?addLoan:null,icon:const Icon(Icons.payments),label:const Text('Registrar préstamo / retiro')),OutlinedButton.icon(onPressed:jornadaAbierta&&!closed?addConsumption:null,icon:const Icon(Icons.restaurant),label:const Text('Registrar consumo del propietario')),const SizedBox(height:12),Card(child:ListTile(leading:const Icon(Icons.inventory_2),title:const Text('Pedidos, gastos y cigarros'),subtitle:const Text('Control de pedidos, gastos, entradas por cajillas y cigarros.'),trailing:const Icon(Icons.chevron_right),onTap:openFeatureHub)),Card(child:ListTile(leading:const Icon(Icons.system_update),title:const Text('Actualización de la aplicación'),subtitle:const Text('Buscar, descargar e instalar la versión más reciente.'),trailing:const Icon(Icons.download),onTap:()=>AppUpdater.checkAndShow(context)))]);}
  Widget card(String a,String b)=>Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(a),Text(b,style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))])));
  Widget warehouse()=>ListView(padding:const EdgeInsets.all(16),children:[const Text('Bodega',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...ps.where((p)=>p.destination=='bodega').map((p)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(p.name,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text((p.warehouse~/p.packSize).toString()+' cajillas + '+(p.warehouse%p.packSize).toString()+' unidades llenas'),Text('Envases/cajillas vacíos disponibles: '+p.emptyContainers.toString(),style:const TextStyle(fontWeight:FontWeight.bold)),FilledButton(onPressed:closed?null:()=>move(p),child:const Text('Pasar a freezer'))]))))]);
- Widget freezer()=>ListView(padding:const EdgeInsets.all(16),children:[const Text('Freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...ps.map((p)=>Card(child:ListTile(title:Text(p.name),subtitle:Text('Actual: ${p.freezer} • Esperado al abrir: ${opening[p.name]??0}'),trailing:Text('C\$${p.price}'))))]);
+ Widget freezer()=>ListView(padding:const EdgeInsets.all(16),children:[const Text('Freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...ps.where((p)=>p.destination!='libre').map((p)=>Card(child:ListTile(title:Text(p.name),subtitle:Text('Actual: '+p.freezer.toString()+' • Esperado al abrir: '+(opening[p.name]??0).toString()),trailing:Text('C\
  Future<void> openDay()async{final ok=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>OpenDayPage(ps,opening)));if(ok==true&&mounted){await change((){jornadaAbierta=true;closed=false;});}}
  Future<void> openFeatureHub()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>FeatureHubPage(products:ps.where((p)=>p.destination=='bodega').map((p)=>FeatureProduct(p.name,p.packSize)).toList(),onWarehouseAdd:(name,units){final p=ps.firstWhere((x)=>x.name==name);p.warehouse+=units;p.emptyContainers=(p.emptyContainers-units).clamp(0,1<<30);},onChanged:(){Store.save();setState((){});})));if(mounted)setState((){});}
  Future<void> move(Product p)async{final c=TextEditingController();final v=await showDialog<int>(context:context,builder:(_)=>AlertDialog(title:Text('Pasar ${p.name}'),content:TextField(controller:c,keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Unidades',helperText:'Disponible: ${p.warehouse}')),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,int.tryParse(c.text)??0),child:const Text('Trasladar'))]));c.dispose();if(v==null||v<=0||v>p.warehouse||p.destination!='bodega')return;if(mounted)await change((){p.warehouse-=v;p.freezer+=v;mov.add(Movement(p.name,v,DateTime.now()));});}
@@ -108,7 +108,365 @@ class _CloseState extends State<ClosePage> {
                 TextField(
                   controller: widget.c[product.name]!,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
+                    labelText: product.destination=='libre'?'Cantidad que queda al cierre':'Unidades que quedan',
+                  ),
+                ),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.c[product.name]!,
+                  builder: (_, value, __) {
+                    final remaining = int.tryParse(value.text) ?? 0;
+                    final base = product.destination=='libre'?product.freeInitial:product.freezer;
+                    final sold = (base - remaining).clamp(0, base);
+                    return Text(
+                      'Venta calculada: $sold unidades • C\$${sold * product.price}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (widget.cigs.isNotEmpty) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(top: 8, bottom: 4),
+          child: Text(
+            'Cigarros',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+
+      children.addAll(
+        widget.cigs.map(
+          (cigarette) {
+            final name = cigarette['name'].toString();
+            final controller = cigC[name]!;
+
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Existencia disponible: ${cigarette['stock'] ?? 0}',
+                    ),
+                    TextField(
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Unidades que quedan',
+                      ),
+                    ),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: controller,
+                      builder: (_, value, __) {
+                        final current = int.tryParse(value.text) ?? 0;
+                        final opening =
+                            int.tryParse('${cigarette['opening'] ?? 0}') ?? 0;
+                        final entries =
+                            int.tryParse('${cigarette['entries'] ?? 0}') ?? 0;
+                        final sold = (opening + entries - current)
+                            .clamp(0, 999999);
+                        final price =
+                            int.tryParse('${cigarette['price'] ?? 0}') ?? 0;
+
+                        return Text(
+                          'Venta calculada: $sold unidades • C\$${sold * price}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    children.add(
+      FilledButton(
+        onPressed: () {
+          final result = <String, int>{};
+
+          for (final product in widget.p) {
+            final remaining =
+                int.tryParse(widget.c[product.name]!.text) ?? -1;
+            if (remaining < 0 || remaining > product.freezer) {
+              return;
+            }
+            result[product.name] = remaining;
+          }
+
+          final cigaretteResult = <String, int>{};
+
+          for (final cigarette in widget.cigs) {
+            final name = cigarette['name'].toString();
+            final remaining = int.tryParse(cigC[name]!.text) ?? -1;
+            final available =
+                int.tryParse('${cigarette['stock'] ?? 0}') ?? 0;
+
+            if (remaining < 0 || remaining > available) {
+              return;
+            }
+            cigaretteResult[name] = remaining;
+          }
+
+          Navigator.pop(
+            context,
+            CloseResult(result, cigaretteResult),
+          );
+        },
+        child: const Text('Confirmar y continuar al arqueo'),
+      ),
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Cierre de jornada')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: children,
+      ),
+    );
+  }
+}
+
+class CashPage extends StatefulWidget{final int sales,loans,cons,adjustments,expected;const CashPage(this.sales,this.loans,this.cons,this.adjustments,this.expected,{super.key});@override State<CashPage> createState()=>_CashState();}
+class _CashState extends State<CashPage>{final c=TextEditingController();@override Widget build(BuildContext x){final a=int.tryParse(c.text),d=a==null?null:a-widget.expected;return Scaffold(appBar:AppBar(title:const Text('Arqueo')),body:ListView(padding:const EdgeInsets.all(20),children:[Text('Venta total del día: C\$${widget.sales}'),Text('Préstamos/retiros: - C\$${widget.loans}'),Text('Consumos: - C\$${widget.cons}'),Text('Gastos y pedidos de Gaseosas/Cigarros: - C\${widget.adjustments}'),const SizedBox(height:12),Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Efectivo esperado después de las deducciones',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),const SizedBox(height:6),Text('C\$${widget.expected}',style:const TextStyle(fontSize:26,fontWeight:FontWeight.bold))])),),const SizedBox(height:12),TextField(controller:c,onChanged:(_)=>setState((){}),keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Efectivo contado',border:OutlineInputBorder())),if(d!=null)Text(d==0?'Exacto':d<0?'Faltante: C\$${d.abs()}':'Sobrante: C\$${d.abs()}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),FilledButton(onPressed:a==null?null:()=>Navigator.pop(x,a),child:const Text('Confirmar arqueo'))]));}}
+class RefillPage extends StatelessWidget{final List<Product> p;const RefillPage(this.p,{super.key});@override Widget build(BuildContext x){final c={for(final z in p)z.name:TextEditingController(text:'0')};return Scaffold(appBar:AppBar(title:const Text('Rellenar Freezer')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Última acción de la jornada',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),...p.map((z)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(z.name,style:const TextStyle(fontWeight:FontWeight.bold)),Text('Bodega: ${z.warehouse} • Freezer: ${z.freezer}'),TextField(controller:c[z.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades a sacar de bodega'))])))),FilledButton(onPressed:(){final r=<String,int>{};for(final z in p){final n=int.tryParse(c[z.name]!.text)??0;if(n<0||n>z.warehouse)return;r[z.name]=n;}Navigator.pop(x,r);},child:const Text('Confirmar y cerrar jornada'))]));}}
+class History extends StatefulWidget{final List<Day> history;const History({super.key,required this.history});@override State<History> createState()=>_HistoryState();}
+class _HistoryState extends State<History>{String? month;@override Widget build(BuildContext c){final all=[...widget.history]..sort((a,b)=>b.date.compareTo(a.date));final months=all.map((r)=>DateFormat('yyyy-MM').format(r.date)).toSet().toList();month??=(months.isEmpty?null:months.first);final rs=all.where((r)=>month==null||DateFormat('yyyy-MM').format(r.date)==month).toList();return ListView(padding:const EdgeInsets.all(16),children:[const Text('Historial por meses',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),if(months.isNotEmpty)DropdownButtonFormField<String>(value:month,items:months.map((m)=>DropdownMenuItem(value:m,child:Text(m))).toList(),onChanged:(v)=>setState(()=>month=v),decoration:const InputDecoration(labelText:'Mes')),if(rs.isNotEmpty) ...[FilledButton.icon(onPressed:()=>PdfReport.makeMonth(rs,month!),icon:const Icon(Icons.picture_as_pdf),label:const Text('Generar PDF del mes')),FilledButton.icon(onPressed:()=>PdfReport.makeQuincena(rs,month!,1),icon:const Icon(Icons.picture_as_pdf),label:const Text('PDF quincena 1–15')),FilledButton.icon(onPressed:()=>PdfReport.makeQuincena(rs,month!,2),icon:const Icon(Icons.picture_as_pdf),label:const Text('PDF quincena 16–fin'))],const SizedBox(height:8),...rs.map((r){final diff=r.difference==0?'Exacto':r.difference<0?'Faltante':'Sobrante';return Card(child:ExpansionTile(title:Text(DateFormat('dd/MM/yyyy').format(r.date)),subtitle:Text('Ventas C\$'+r.sales.toString()+' • '+diff),children:[ListTile(title:const Text('Gastos'),trailing:Text('C\$'+r.expenses.toString())),ListTile(title:const Text('Esperado'),trailing:Text('C\$'+r.expected.toString())),ListTile(title:const Text('Contado'),trailing:Text('C\$'+r.actual.toString())),ListTile(title:const Text('Diferencia'),trailing:Text('C\$'+r.difference.toString())),ListTile(title:const Text('Préstamos'),trailing:Text('C\$'+r.loans.fold(0,(s,x)=>s+x.amount).toString())),ListTile(title:const Text('Consumos'),trailing:Text('C\$'+r.consumptions.fold(0,(s,x)=>s+x.value).toString()))]));}),if(rs.isEmpty)const Text('No hay jornadas cerradas en este mes.')]);}}
+class PdfReport {
+  static Future<void> _saveAndShare(pw.Document document, String filename) async {
+    final bytes = await document.save();
+    final dir = Platform.isAndroid
+        ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory())
+        : await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    await Printing.sharePdf(bytes: bytes, filename: filename);
+  }
+
+  static String _money(int value) => 'C\$$value';
+
+  static String _supplierLabel(String supplier) {
+    final s = supplier.trim().toLowerCase();
+    if (s == 'cervecería' || s == 'cerveceria') return 'Cervecería';
+    if (s == 'gaseosas') return 'Gaseosas';
+    if (s == 'cigarros') return 'Cigarros';
+    return supplier.trim().isEmpty ? 'Sin proveedor' : supplier.trim();
+  }
+
+  static Future<void> makeMonth(List<Day> days, String month) async {
+    final document = pw.Document();
+    final first = days.where((d) => d.date.day <= 15).toList();
+    final second = days.where((d) => d.date.day >= 16).toList();
+    await _addPeriod(document, first, month, 1);
+    await _addPeriod(document, second, month, 2);
+    if (first.isEmpty && second.isEmpty) return;
+    await _saveAndShare(document, 'Inventario-Billar-$month.pdf');
+  }
+
+  static Future<void> makeQuincena(List<Day> days, String month, int q) async {
+    final period = days.where((d) => q == 1 ? d.date.day <= 15 : d.date.day >= 16).toList();
+    if (period.isEmpty) return;
+    final document = pw.Document();
+    await _addPeriod(document, period, month, q);
+    await _saveAndShare(document, 'Inventario-Billar-$month-Q$q.pdf');
+  }
+
+  static Future<void> _addPeriod(pw.Document document, List<Day> period, String month, int q) async {
+    if (period.isEmpty) return;
+    final sorted = [...period]..sort((a, b) => a.date.compareTo(b.date));
+    final firstDate = sorted.first.date;
+    final lastDate = sorted.last.date;
+    final start = DateTime(firstDate.year, firstDate.month, q == 1 ? 1 : 16);
+    final end = q == 1 ? DateTime(firstDate.year, firstDate.month, 16) : DateTime(firstDate.year, firstDate.month + 1, 1);
+    final orders = await FeatureStore.ordersForPeriod(start, end);
+
+    int paidValue(Map<String,dynamic> o) => int.tryParse('${o['paid'] ?? 0}') ?? 0;
+    DateTime? orderDate(Map<String,dynamic> o) => DateTime.tryParse('${o['date'] ?? ''}');
+    String supplier(Map<String,dynamic> o) => _supplierLabel('${o['supplier'] ?? ''}');
+    final beerOrderTotal = orders.where((o) => supplier(o) == 'Cervecería').fold<int>(0,(s,o)=>s+paidValue(o));
+    final gaseosasOrderTotal = orders.where((o) => supplier(o) == 'Gaseosas').fold<int>(0,(s,o)=>s+paidValue(o));
+    final cigarrosOrderTotal = orders.where((o) => supplier(o) == 'Cigarros').fold<int>(0,(s,o)=>s+paidValue(o));
+    final sales = sorted.fold<int>(0,(s,d)=>s+d.sales);
+    final expenses = sorted.fold<int>(0,(s,d)=>s+d.expenses);
+    final consumptions = sorted.fold<int>(0,(s,d)=>s+d.consumptions.fold<int>(0,(x,c)=>x+c.value));
+    final loans = sorted.fold<int>(0,(s,d)=>s+d.loans.fold<int>(0,(x,l)=>x+l.amount));
+    final distributable = sales - beerOrderTotal;
+    final share = distributable ~/ 5;
+
+    final rows = sorted.map((d) {
+      final ds=DateTime(d.date.year,d.date.month,d.date.day);
+      final de=ds.add(const Duration(days:1));
+      final dailyG=orders.where((o){final od=orderDate(o);return supplier(o)=='Gaseosas'&&od!=null&&!od.isBefore(ds)&&od.isBefore(de);}).fold<int>(0,(s,o)=>s+paidValue(o));
+      final dailyC=orders.where((o){final od=orderDate(o);return supplier(o)=='Cigarros'&&od!=null&&!od.isBefore(ds)&&od.isBefore(de);}).fold<int>(0,(s,o)=>s+paidValue(o));
+      return <String>[
+        DateFormat('dd/MM/yyyy').format(d.date),
+        _money(d.sales),
+        _money(d.expenses),
+        _money(dailyG),
+        _money(dailyC),
+        _money(d.consumptions.fold<int>(0,(s,c)=>s+c.value)),
+        _money(d.loans.fold<int>(0,(s,l)=>s+l.amount)),
+        _money(d.actual),
+      ];
+    }).toList();
+
+    document.addPage(pw.MultiPage(build: (_) => [
+      pw.Header(level:0, child:pw.Text('Inventario Billar - Corte quincenal')),
+      pw.Text('Mes $month - ${q==1?'Días 1-15':'Días 16-fin'}'),
+      pw.Text('Período: ${DateFormat('dd/MM/yyyy').format(start)} al ${DateFormat('dd/MM/yyyy').format(lastDate)}'),
+      pw.SizedBox(height:10),
+      pw.TableHelper.fromTextArray(headers:['Fecha','Ventas','Gastos','Gaseosas','Cigarros','Consumos','Préstamos','Contado'],data:rows),
+      pw.SizedBox(height:14),
+      pw.Text('RESUMEN QUINCENAL',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      pw.Text('Ventas totales: '+_money(sales)),
+      pw.Text('Pedidos Cervecería (deducción quincenal): '+_money(beerOrderTotal)),
+      pw.Text('Pedidos Gaseosas (ya deducidos diariamente): '+_money(gaseosasOrderTotal)),
+      pw.Text('Pedidos Cigarros (ya deducidos diariamente): '+_money(cigarrosOrderTotal)),
+      pw.Text('Gastos totales: '+_money(expenses)),
+      pw.Text('Consumos totales: '+_money(consumptions)),
+      pw.Text('Préstamos/retiros totales: '+_money(loans)),
+      pw.SizedBox(height:8),
+      pw.Text('Total distribuible = Ventas - Cervecería: '+_money(distributable),style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      pw.Text('Cada uno de los 5 socios: '+_money(share),style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      pw.SizedBox(height:14),
+      pw.Text('PEDIDOS POR PROVEEDOR',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      ...orders.map((o)=>pw.Text('${DateFormat('dd/MM/yyyy').format(orderDate(o)??DateTime.now())} • ${supplier(o)} • Pagado '+_money(paidValue(o)))),
+      pw.SizedBox(height:14),
+      pw.Text('PRÉSTAMOS / RETIROS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      ...sorted.expand((d)=>d.loans.map((l)=>pw.Text('${DateFormat('dd/MM/yyyy').format(l.date)} • ${l.person} • ${l.reason} • '+_money(l.amount)))),
+      pw.Text('Total préstamos: '+_money(loans)),
+      pw.SizedBox(height:14),
+      pw.Text('CONSUMOS POR PERSONA',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      ..._consumptionLines(sorted),
+      pw.Text('Total consumos quincena: '+_money(consumptions)),
+      pw.SizedBox(height:14),
+      pw.Text('GASTOS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),
+      ...sorted.expand((d)=>d.expenseDetails.map((e)=>pw.Text('${DateFormat('dd/MM/yyyy').format(d.date)} • ${e['concept'] ?? ''} • ${e['observation'] ?? ''} • '+_money(int.tryParse('${e['amount'] ?? 0}')??0)))),
+      pw.Text('Total gastos: '+_money(expenses)),
+    ]));
+  }
+
+  static List<pw.Widget> _consumptionLines(List<Day> days) {
+    final byPerson=<String,List<Consumption>>{};
+    for(final d in days){for(final c in d.consumptions){byPerson.putIfAbsent(c.person,()=>[]).add(c);}}
+    final result=<pw.Widget>[];
+    for(final entry in byPerson.entries){
+      final total=entry.value.fold<int>(0,(s,c)=>s+c.value);
+      result.add(pw.Text(entry.key));
+      for(final c in entry.value){result.add(pw.Text('  ${DateFormat('dd/MM/yyyy').format(c.date)} • ${c.quantity} x ${c.product} • '+_money(c.value)));}
+      result.add(pw.Text('  Total ${entry.key}: '+_money(total),style:pw.TextStyle(fontWeight:pw.FontWeight.bold)));
+    }
+    return result;
+  }
+
+  static Future<void> autoGenerateIfCutoff(DateTime date, List<Day> days) async {
+    final lastDay = DateTime(date.year, date.month + 1, 0).day;
+    int q=0;
+    if(date.day==15) q=1; else if(date.day==lastDay) q=2;
+    if(q==0) return;
+    final month=DateFormat('yyyy-MM').format(date);
+    final period=days.where((d)=>q==1?d.date.day<=15:d.date.day>=16).toList();
+    if(period.isNotEmpty) await makeQuincena(period,month,q);
+  }
+}
++p.price.toString()))))]);
+ Future<void> openDay()async{final ok=await Navigator.push<bool>(context,MaterialPageRoute(builder:(_)=>OpenDayPage(ps,opening)));if(ok==true&&mounted){await change((){jornadaAbierta=true;closed=false;});}}
+ Future<void> openFeatureHub()async{await Navigator.push(context,MaterialPageRoute(builder:(_)=>FeatureHubPage(products:ps.where((p)=>p.destination=='bodega').map((p)=>FeatureProduct(p.name,p.packSize)).toList(),onWarehouseAdd:(name,units){final p=ps.firstWhere((x)=>x.name==name);p.warehouse+=units;p.emptyContainers=(p.emptyContainers-units).clamp(0,1<<30);},onChanged:(){Store.save();setState((){});})));if(mounted)setState((){});}
+ Future<void> move(Product p)async{final c=TextEditingController();final v=await showDialog<int>(context:context,builder:(_)=>AlertDialog(title:Text('Pasar ${p.name}'),content:TextField(controller:c,keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Unidades',helperText:'Disponible: ${p.warehouse}')),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,int.tryParse(c.text)??0),child:const Text('Trasladar'))]));c.dispose();if(v==null||v<=0||v>p.warehouse||p.destination!='bodega')return;if(mounted)await change((){p.warehouse-=v;p.freezer+=v;mov.add(Movement(p.name,v,DateTime.now()));});}
+ Future<void> addLoan()async{final a=TextEditingController(),m=TextEditingController(),r=TextEditingController();final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Préstamo / retiro'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:a,decoration:const InputDecoration(labelText:'Persona')),TextField(controller:m,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Monto C\$')),TextField(controller:r,decoration:const InputDecoration(labelText:'Motivo'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&(int.tryParse(m.text)??0)>0&&a.text.trim().isNotEmpty)await change(()=>loans.add(Loan(a.text.trim(),int.parse(m.text),r.text.trim(),DateTime.now())));a.dispose();m.dispose();r.dispose();}
+ Future<void> addConsumption()async{String? sel;final who=TextEditingController(),q=TextEditingController(text:'1');final ok=await showDialog<bool>(context:context,builder:(_)=>StatefulBuilder(builder:(c,setD)=>AlertDialog(title:const Text('Consumo del propietario'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:who,decoration:const InputDecoration(labelText:'Quién')),DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Producto'),items:ps.map((p)=>DropdownMenuItem(value:p.name,child:Text(p.name))).toList(),onChanged:(v)=>setD(()=>sel=v)),TextField(controller:q,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Cantidad'))]),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Guardar'))])));if(ok==true&&sel!=null){final p=ps.firstWhere((x)=>x.name==sel);final n=int.tryParse(q.text)??0;if(n>0&&n<=p.freezer&&who.text.trim().isNotEmpty)await change((){p.freezer-=n;cons.add(Consumption(who.text.trim(),p.name,n,n*p.price,DateTime.now()));});}who.dispose();q.dispose();}
+ Future<void> closeDay()async{final cs={for(final p in ps)p.name:TextEditingController(text:p.destination=='libre'?p.freeInitial.toString():p.freezer.toString())};final cigs=await FeatureStore.cigarettesForClose();final counts=await Navigator.push<CloseResult>(context,MaterialPageRoute(builder:(_)=>ClosePage(ps,cs,opening,cigs)));for(final c in cs.values)c.dispose();if(counts==null)return;final sold=<String,int>{};int sales=0;for(final p in ps){final n=counts.beer[p.name]!;final base=p.destination=='libre'?p.freeInitial:p.freezer;final soldUnits=base-n;if(n<0||soldUnits<0)return;if(p.destination=='libre'){p.freeInitial=n;}else{p.freezer=n;if(soldUnits>0&&p.destination=='bodega')p.emptyContainers+=soldUnits;}if(soldUnits>0){sold[p.name]=soldUnits;sales+=soldUnits*p.price;}}await FeatureStore.setCigaretteClosing(counts.cigarettes);final feature=await FeatureStore.summary();final dailyOrderDeductions=await FeatureStore.dailyPaidOrdersBySupplier(dayDate,['Gaseosas','Cigarros']);final lt=loans.fold(0,(s,x)=>s+x.amount),ct=cons.fold(0,(s,x)=>s+x.value);final dailySales=sales+feature.cigaretteSales;final expected=dailySales-lt-ct-feature.expensesTotal-dailyOrderDeductions;final actual=await Navigator.push<int>(context,MaterialPageRoute(builder:(_)=>CashPage(dailySales,lt,ct,feature.expensesTotal,expected)));if(actual==null)return;final dayExpenseDetails=await FeatureStore.expensesForDate(dayDate);final diff=actual-expected;await showDialog(context:context,barrierDismissible:false,builder:(_)=>AlertDialog(title:const Text('Arqueo final'),content:Text(diff==0?'Exacto: C\$0':diff<0?'Faltante: C\$${diff.abs()}':'Sobrante: C\$${diff.abs()}'),actions:[FilledButton(onPressed:()=>Navigator.pop(context),child:const Text('Continuar'))]));final refill=await Navigator.push<Map<String,int>>(context,MaterialPageRoute(builder:(_)=>RefillPage(ps.where((p)=>p.destination=='bodega').toList())));if(refill==null)return;final pre={for(final p in ps)p.name:p.freezer};await change((){for(final p in ps){final n=refill[p.name]??0;p.warehouse-=n;p.freezer+=n;if(n>0)mov.add(Movement(p.name,n,DateTime.now(),type:'Bodega → Freezer (Relleno)'));}H.add(Day(date:dayDate,opening:Map.from(opening),finalStock:pre,sold:sold,refill:Map.from(refill),loans:List.from(loans),consumptions:List.from(cons),movements:List.from(mov),expenseDetails:dayExpenseDetails,sales:dailySales,expenses:feature.expensesTotal,expected:expected,actual:actual,difference:diff));lastSales=sales+feature.cigaretteSales;lastExpected=expected;opening..clear()..addEntries(ps.map((p)=>MapEntry(p.name,p.freezer)));loans.clear();cons.clear();mov.clear();closed=true;jornadaAbierta=false;});await PdfReport.autoGenerateIfCutoff(dayDate,List.from(H));await FeatureStore.resetDay();}
+}
+class InitialSetupPage extends StatefulWidget{final List<Product> products;final VoidCallback onSaved;const InitialSetupPage({super.key,required this.products,required this.onSaved});@override State<InitialSetupPage> createState()=>_InitialSetupState();}
+class _InitialSetupState extends State<InitialSetupPage>{late final Map<String,TextEditingController> wh,fr,empty;@override void initState(){super.initState();wh={for(final p in widget.products)p.name:TextEditingController(text:'0')};fr={for(final p in widget.products)p.name:TextEditingController(text:'0')};empty={for(final p in widget.products)p.name:TextEditingController(text:'0')};}Future<void> addProduct()async{final n=TextEditingController(),pr=TextEditingController(),pk=TextEditingController(text:'1'),prov=TextEditingController();String pres='unidad',dest='bodega';final ok=await showDialog<bool>(context:context,builder:(c)=>StatefulBuilder(builder:(c,setD)=>AlertDialog(title:const Text('Agregar producto'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:n,decoration:const InputDecoration(labelText:'Nombre')),TextField(controller:pr,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Precio por unidad C$')),TextField(controller:pk,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades por cajilla/paquete')),DropdownButtonFormField<String>(value:pres,decoration:const InputDecoration(labelText:'Presentación'),items:const['unidad','cajilla','paquete'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>pres=v??'unidad')),DropdownButtonFormField<String>(value:dest,decoration:const InputDecoration(labelText:'Destino'),items:const[DropdownMenuItem(value:'bodega',child:Text('Bodega (retornable)')),DropdownMenuItem(value:'freezer',child:Text('Directo a freezer')),DropdownMenuItem(value:'libre',child:Text('Venta libre'))],onChanged:(v)=>setD(()=>dest=v??'bodega')),TextField(controller:prov,decoration:const InputDecoration(labelText:'Proveedor'))])),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Agregar'))])));if(ok==true&&n.text.trim().isNotEmpty&&(int.tryParse(pr.text)??0)>0&&(int.tryParse(pk.text)??0)>0&&!widget.products.any((p)=>p.name.toLowerCase()==n.text.trim().toLowerCase())){setState((){final p=Product(n.text.trim(),int.parse(pr.text),int.parse(pk.text),presentation:pres,provider:prov.text.trim(),destination:dest);widget.products.add(p);wh[p.name]=TextEditingController(text:'0');fr[p.name]=TextEditingController(text:'0');empty[p.name]=TextEditingController(text:'0');});}n.dispose();pr.dispose();pk.dispose();prov.dispose();}@override void dispose(){for(final m in [wh,fr,empty]){for(final c in m.values){c.dispose();}}super.dispose();}@override Widget build(BuildContext x)=>Scaffold(appBar:AppBar(title:const Text('Configuración inicial')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Configurar productos e inventario inicial',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),const Text('Después de guardar, la configuración de productos queda bloqueada en la aplicación.'),OutlinedButton.icon(onPressed:addProduct,icon:const Icon(Icons.add),label:const Text('Agregar producto')),...widget.products.map((p)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(p.name,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Text('Precio: C$'+p.price.toString()+' • '+p.presentation+' • '+p.destination),if(p.destination=='bodega')TextField(controller:wh[p.name],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:p.presentation=='cajilla'?'Cajillas llenas iniciales en bodega':p.presentation=='paquete'?'Paquetes iniciales en bodega':'Unidades iniciales en bodega',helperText:p.packSize.toString()+' unidades por presentación')),if(p.destination!='libre')TextField(controller:fr[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades iniciales en freezer')),if(p.destination=='libre')TextField(controller:fr[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Cantidad inicial de venta libre')),if(p.destination=='bodega')TextField(controller:empty[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Envases/cajillas vacíos iniciales'))])))),FilledButton.icon(onPressed:()async{for(final p in widget.products){final w=int.tryParse(wh[p.name]?.text??'0')??-1;final f=int.tryParse(fr[p.name]?.text??'0')??-1;final e=int.tryParse(empty[p.name]?.text??'0')??-1;if(w<0||f<0||e<0)return;p.warehouse=p.destination=='bodega'?(p.presentation=='unidad'?w:w*p.packSize):0;p.freezer=p.destination=='libre'?0:f;p.freeInitial=p.destination=='libre'?f:0;p.emptyContainers=p.destination=='bodega'?e:0;opening[p.name]=p.freezer;}await Store.save();if(mounted)widget.onSaved();},icon:const Icon(Icons.save),label:const Text('Guardar configuración inicial'))]));}
+class OpenDayPage extends StatefulWidget{final List<Product> products;final Map<String,int> expected;const OpenDayPage(this.products,this.expected,{super.key});@override State<OpenDayPage> createState()=>_OpenDayState();}
+class _OpenDayState extends State<OpenDayPage>{final checked=<String,bool>{};@override void initState(){super.initState();for(final p in widget.products)checked[p.name]=false;}bool get allChecked=>checked.values.every((v)=>v);@override Widget build(BuildContext x)=>Scaffold(appBar:AppBar(title:const Text('Abrir jornada')),body:ListView(padding:const EdgeInsets.all(16),children:[const Text('Verificación inicial del freezer',style:TextStyle(fontSize:24,fontWeight:FontWeight.bold)),const SizedBox(height:8),const Text('Confirma con un check cada producto después de comprobar físicamente las unidades indicadas.'),const SizedBox(height:12),...widget.products.map((p)=>Card(child:CheckboxListTile(value:checked[p.name]??false,onChanged:(v)=>setState(()=>checked[p.name]=v??false),title:Text(p.name,style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('Hay ${widget.expected[p.name]??0} unidades en freezer'),secondary:CircleAvatar(child:Text('${widget.expected[p.name]??0}'))))),const SizedBox(height:12),FilledButton.icon(onPressed:allChecked?()=>Navigator.pop(x,true):null,icon:const Icon(Icons.lock_open),label:const Text('Confirmar y abrir jornada'))]));}
+class CloseResult{final Map<String,int> beer,cigarettes;CloseResult(this.beer,this.cigarettes);}
+class ClosePage extends StatefulWidget {
+  final List<Product> p;
+  final Map<String, TextEditingController> c;
+  final Map<String, int> o;
+  final List<Map<String, dynamic>> cigs;
+
+  const ClosePage(this.p, this.c, this.o, this.cigs, {super.key});
+
+  @override
+  State<ClosePage> createState() => _CloseState();
+}
+
+class _CloseState extends State<ClosePage> {
+  late final Map<String, TextEditingController> cigC;
+
+  @override
+  void initState() {
+    super.initState();
+    cigC = {
+      for (final z in widget.cigs)
+        z['name'].toString(): TextEditingController(
+          text: '${z['stock'] ?? 0}',
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final controller in cigC.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final children = <Widget>[
+      const Text(
+        'Inventario final',
+        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 8),
+    ];
+
+    children.addAll(
+      widget.p.map(
+        (product) => Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(product.destination=='libre'?'Cantidad inicial: '+product.freeInitial.toString():'Esperado al abrir: '+(widget.o[product.name]??0).toString()+' • Disponible: '+product.freezer.toString()),
+                TextField(
+                  controller: widget.c[product.name]!,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
                     labelText: product.destination=='libre'?'Cantidad que queda al cierre':'Unidades que quedan',
                   ),
                 ),
