@@ -85,7 +85,7 @@ class _FeatureHubState extends State<FeatureHubPage>{
       if(cigs.isNotEmpty) const Text('Productos de cigarros',style:TextStyle(fontWeight:FontWeight.bold)),
       ...cigs.map((c)=>TextField(controller:cigUnits[c['name']],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Paquetes de ${c['name']} (${c['packSize'] ?? 20} unidades)'))),
      ],
-     TextField(controller:paid,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Total pagado C\\$')),
+     TextField(controller:paid,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Total pagado C\$')),
      TextField(controller:obs,decoration:const InputDecoration(labelText:'Observación')),
     ]))),
     actions:[TextButton(onPressed:()=>Navigator.pop(dialogContext,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(dialogContext,true),child:const Text('Guardar'))],
