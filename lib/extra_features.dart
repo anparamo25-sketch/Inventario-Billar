@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class FeatureProduct{final String name;final int packSize;const FeatureProduct(this.name,this.packSize);}
+class FeatureProduct{final String name;final int packSize;final String supplier,presentation,destination;const FeatureProduct(this.name,this.packSize,this.supplier,this.presentation,this.destination);}
 class FeatureDaySummary{final int expensesTotal,ordersPaid,cigaretteSales;const FeatureDaySummary({required this.expensesTotal,required this.ordersPaid,required this.cigaretteSales});}
 class FeatureStore{
  static Future<SharedPreferences> get _p=>SharedPreferences.getInstance();
@@ -54,7 +54,61 @@ class _FeatureHubState extends State<FeatureHubPage>{
  Future<void> load()async{expenses=await FeatureStore._list('feature_expenses');orders=await FeatureStore._list('feature_orders');cigs=await FeatureStore._list('feature_cigarettes');final p=await FeatureStore._p;final a=jsonDecode(p.getString('feature_cigarette_entries')??'{}');final o=jsonDecode(p.getString('feature_cigarette_opening')??'{}');entries=Map<String,int>.from((a as Map).map((k,v)=>MapEntry(k,(v as num).toInt())));opening=Map<String,int>.from((o as Map).map((k,v)=>MapEntry(k,(v as num).toInt())));if(cigs.isEmpty){cigs=[{'name':'Moder','price':5,'stock':0,'packSize':20,'provider':'Cigarros'}];await save();}setState(()=>loading=false);}
  Future<void> save()async{await FeatureStore._save('feature_expenses',expenses);await FeatureStore._save('feature_orders',orders);await FeatureStore._save('feature_cigarettes',cigs);final p=await FeatureStore._p;await p.setString('feature_cigarette_entries',jsonEncode(entries));await p.setString('feature_cigarette_opening',jsonEncode(opening));}
  Future<void> addExpense()async{final concept=TextEditingController(),amount=TextEditingController(),obs=TextEditingController();final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Registrar gasto'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:concept,decoration:const InputDecoration(labelText:'Concepto')),TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Monto C\$')),TextField(controller:obs,decoration:const InputDecoration(labelText:'Observación'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&(int.tryParse(amount.text)??0)>0&&concept.text.trim().isNotEmpty){expenses.add({'concept':concept.text.trim(),'amount':int.parse(amount.text),'observation':obs.text.trim(),'date':DateTime.now().toIso8601String()});await save();setState((){});widget.onChanged();}concept.dispose();amount.dispose();obs.dispose();}
- Future<void> addOrder()async{String? selectedSupplier;final paid=TextEditingController(),obs=TextEditingController();final cases={for(final p in widget.products)p.name:TextEditingController(text:'0')};final cigUnits={for(final c in cigs)c['name']:TextEditingController(text:'0')};final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Registrar pedido'),content:SizedBox(width:500,child:SingleChildScrollView(child:Column(children:[DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Proveedor'),items:const['Cervecería','Gaseosas','Cigarros'].map((s)=>DropdownMenuItem(value:s,child:Text(s))).toList(),onChanged:(v)=>selectedSupplier=v),const SizedBox(height:8),...widget.products.map((p)=>TextField(controller:cases[p.name],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'${p.name} — cajillas (${p.packSize} unidades)'))),const Divider(),const Text('Cigarros',style:TextStyle(fontWeight:FontWeight.bold)),...cigs.map((c)=>TextField(controller:cigUnits[c['name']],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Paquetes de ${c['name']} (${c['packSize'] ?? 20} unidades)'))),TextField(controller:paid,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Total pagado C\$')),TextField(controller:obs,decoration:const InputDecoration(labelText:'Observación'))])),),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&selectedSupplier!=null){final wc=<String,int>{};for(final p in widget.products){final n=int.tryParse(cases[p.name]!.text)??0;if(n>0){wc[p.name]=n;widget.onWarehouseAdd(p.name,n*p.packSize);}}for(final c in cigs){final packages=int.tryParse(cigUnits[c['name']]!.text)??0;final units=packages*(int.tryParse('${c['packSize'] ?? 20}')??20);if(packages>0){c['stock']=(c['stock'] as int)+units;entries[c['name']]=(entries[c['name']]??0)+units;}}orders.add({'supplier':selectedSupplier,'paid':int.tryParse(paid.text)??0,'cases':wc,'date':DateTime.now().toIso8601String(),'observation':obs.text.trim()});await save();setState((){});widget.onChanged();}for(final c in cases.values)c.dispose();for(final c in cigUnits.values)c.dispose();paid.dispose();obs.dispose();}
+ Future<void> addOrder() async {
+  String? selectedSupplier;
+  final paid=TextEditingController(),obs=TextEditingController();
+  final cases={for(final p in widget.products)p.name:TextEditingController(text:'0')};
+  final cigUnits={for(final c in cigs)c['name']:TextEditingController(text:'0')};
+  String supplierOf(String value) {
+   final s=value.trim().toLowerCase();
+   if(s=='cervecería'||s=='cerveceria') return 'Cervecería';
+   if(s=='gaseosa'||s=='gaseosas') return 'Gaseosas';
+   if(s=='cigarro'||s=='cigarros') return 'Cigarros';
+   return value.trim();
+  }
+  final ok=await showDialog<bool>(context:context,builder:(dialogContext)=>StatefulBuilder(
+   builder:(dialogContext,setDialogState)=>AlertDialog(
+    title:const Text('Registrar pedido'),
+    content:SizedBox(width:500,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+     DropdownButtonFormField<String>(
+      value:selectedSupplier,
+      decoration:const InputDecoration(labelText:'Proveedor'),
+      hint:const Text('Seleccionar proveedor'),
+      items:const[DropdownMenuItem(value:'Cervecería',child:Text('Cervecería')),DropdownMenuItem(value:'Gaseosas',child:Text('Gaseosa')),DropdownMenuItem(value:'Cigarros',child:Text('Cigarros'))],
+      onChanged:(v)=>setDialogState(()=>selectedSupplier=v),
+     ),
+     const SizedBox(height:8),
+     if(selectedSupplier!=null)
+      ...widget.products.where((p)=>supplierOf(p.supplier)==selectedSupplier).map((p)=>TextField(controller:cases[p.name],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'${p.name} — ${p.presentation} (${p.packSize} unidades)'))),
+     if(selectedSupplier=='Cigarros') ...[
+      if(cigs.isNotEmpty) const Divider(),
+      if(cigs.isNotEmpty) const Text('Productos de cigarros',style:TextStyle(fontWeight:FontWeight.bold)),
+      ...cigs.map((c)=>TextField(controller:cigUnits[c['name']],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Paquetes de ${c['name']} (${c['packSize'] ?? 20} unidades)'))),
+     ],
+     TextField(controller:paid,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Total pagado C\\$')),
+     TextField(controller:obs,decoration:const InputDecoration(labelText:'Observación')),
+    ]))),
+    actions:[TextButton(onPressed:()=>Navigator.pop(dialogContext,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(dialogContext,true),child:const Text('Guardar'))],
+   ),
+  ));
+  if(ok==true&&selectedSupplier!=null){
+   final wc=<String,int>{};
+   for(final p in widget.products.where((p)=>supplierOf(p.supplier)==selectedSupplier)){
+    final n=int.tryParse(cases[p.name]!.text)??0;
+    if(n>0){wc[p.name]=n;widget.onWarehouseAdd(p.name,n*p.packSize);}
+   }
+   if(selectedSupplier=='Cigarros'){
+    for(final c in cigs){
+     final packages=int.tryParse(cigUnits[c['name']]!.text)??0;
+     final units=packages*(int.tryParse('${c['packSize'] ?? 20}')??20);
+     if(packages>0){c['stock']=(int.tryParse('${c['stock']??0}')??0)+units;entries[c['name']]=(entries[c['name']]??0)+units;}
+    }
+   }
+   orders.add({'supplier':selectedSupplier,'paid':int.tryParse(paid.text)??0,'cases':wc,'date':DateTime.now().toIso8601String(),'observation':obs.text.trim()});
+   await save();setState((){});widget.onChanged();
+  }
+  for(final c in cases.values)c.dispose();for(final c in cigUnits.values)c.dispose();paid.dispose();obs.dispose();
+ }
  Future<void> addCigarette()async{final name=TextEditingController(),price=TextEditingController();final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Nuevo producto de cigarros'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:name,decoration:const InputDecoration(labelText:'Nombre')),TextField(controller:price,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Precio de venta C\$'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancelar')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Guardar'))]));if(ok==true&&name.text.trim().isNotEmpty){cigs.add({'name':name.text.trim(),'price':int.tryParse(price.text)??0,'stock':0,'packSize':20,'provider':'Cigarros'});opening[name.text.trim()]=0;entries[name.text.trim()]=0;await save();setState((){});}name.dispose();price.dispose();}
  Widget expensesTab()=>ListView(padding:const EdgeInsets.all(16),children:[FilledButton.icon(onPressed:addExpense,icon:const Icon(Icons.add),label:const Text('Registrar gasto')),const SizedBox(height:12),...expenses.reversed.map((e)=>Card(child:ListTile(title:Text(e['concept']??''),subtitle:Text(e['observation']??''),trailing:Text('C\$${e['amount']}')))),if(expenses.isEmpty)const Text('No hay gastos registrados.')]);
  Widget ordersTab()=>ListView(padding:const EdgeInsets.all(16),children:[FilledButton.icon(onPressed:addOrder,icon:const Icon(Icons.add_shopping_cart),label:const Text('Registrar pedido')),const SizedBox(height:12),...orders.reversed.map((o)=>Card(child:ListTile(title:Text((o['supplier']??'').toString().isEmpty?'Pedido':'Pedido — ${o['supplier']}'),subtitle:Text('Pagado C\$${o['paid']}'),trailing:const Icon(Icons.receipt_long)))),if(orders.isEmpty)const Text('No hay pedidos registrados.')]);
