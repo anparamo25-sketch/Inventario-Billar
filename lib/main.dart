@@ -80,7 +80,7 @@ class _InitialSetupState extends State<InitialSetupPage> {
    OutlinedButton.icon(onPressed:add,icon:const Icon(Icons.add),label:const Text('Agregar producto')),
    ...widget.products.map((p)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Text(p.name,style:const TextStyle(fontWeight:FontWeight.bold)),
-    Text('Precio C\\$'+p.price.toString()+' • '+p.destination+' • Proveedor: '+(p.provider=='Gaseosas'?'Gaseosa':p.provider)+' • Presentación: '+p.presentation),
+    Text('Precio C\$'+p.price.toString()+' • '+p.destination+' • Proveedor: '+(p.provider=='Gaseosas'?'Gaseosa':p.provider)+' • Presentación: '+p.presentation),
     if(p.destination=='bodega')TextField(controller:wh[p.name],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:'Presentaciones iniciales en bodega (${p.presentation}; ${p.packSize} unidades)')),
     if(p.destination=='freezer')TextField(controller:fr[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Unidades iniciales en freezer')),
     if(p.destination=='libre')TextField(controller:fr[p.name],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Cantidad inicial de venta libre')),
